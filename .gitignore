@@ -1,0 +1,6 @@
+__pycache__/
+.ipynb_checkpoints/
+.vscode/
+MultiWOZ_2.1/
+log/
+save/
