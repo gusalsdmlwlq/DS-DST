@@ -30,11 +30,11 @@ def test(model, reader, hparams):
             for turn_idx in range(turns):
                 # split batches for gpu memory
                 context_len = contexts[turn_idx].size(1)
-                if context_len >= 450:
+                if context_len >= 410:
                     small_batch_size = min(int(hparams.batch_size / 8), batch_size)
-                elif context_len >= 300:
+                elif context_len >= 260:
                     small_batch_size = min(int(hparams.batch_size / 4), batch_size)
-                elif context_len >= 200:
+                elif context_len >= 160:
                     small_batch_size = min(int(hparams.batch_size / 2), batch_size)
                 else:
                     small_batch_size = batch_size
@@ -90,6 +90,7 @@ if __name__ == "__main__":
     device = torch.device("cpu" if hparams.no_cuda else "cuda")
     model = DST(hparams).to(device)
     model = amp.initialize(model, opt_level="O1", verbosity=0)
+    model = torch.nn.DataParallel(model)
     
     load(model, save_path)  # load saved model, optimizer
 

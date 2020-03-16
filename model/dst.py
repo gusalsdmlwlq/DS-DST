@@ -74,7 +74,7 @@ class DST(nn.Module):
         gate_output = F.log_softmax(gate_output, dim=1)
 
         gate_label = turn_input["gate"][:, slot_idx]  # gate_label: [batch]
-        loss_gate = F.nll_loss(gate_output, gate_label)
+        loss_gate = F.nll_loss(gate_output, gate_label, reduction="none")
 
         if self.use_span:  # use span-based method
             span_outputs = None
@@ -94,7 +94,7 @@ class DST(nn.Module):
             span_mask = (span_label == 0)  # span is zero, if there are not value spans in context
             span_label += slot_len  # update span index after concat with slot
             span_label.masked_fill_(span_mask, 0)           
-            loss_span = F.nll_loss(span_outputs[:, 0, :], span_label[:, 0]) + F.nll_loss(span_outputs[:, 1, :], span_label[:, 1])
+            loss_span = F.nll_loss(span_outputs[:, 0, :], span_label[:, 0], reduction="none") + F.nll_loss(span_outputs[:, 1, :], span_label[:, 1], reduction="none")
 
         value_probs = None
         value_list = self.value_ontology[slot_] + ["none"]
@@ -118,8 +118,9 @@ class DST(nn.Module):
         true_value_mask = (value_probs == true_value_probs)
         value_probs.masked_fill_(true_value_mask, -1.0)
         max_value_probs = value_probs.max(dim=1, keepdim=True)[0]  # max_value_probs: [batch, 1]
-        loss_value = torch.max(torch.cat([torch.zeros_like(true_value_probs), self.margin - true_value_probs + max_value_probs], dim=1),dim=1)[0].mean()  # loss_value: [batch]
+        loss_value = torch.max(torch.cat([torch.zeros_like(true_value_probs), self.margin - true_value_probs + max_value_probs], dim=1),dim=1)[0]  # loss_value: [batch]
 
+        # loss: [batch]
         if self.use_span:
             loss = loss_gate + loss_span + loss_value
         else:
