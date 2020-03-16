@@ -139,6 +139,7 @@ class DST(nn.Module):
             pred = torch.tensor(self.tokenizer.encode(value_list[value_probs[batch_idx]])).to(self.device)  # pred: [value_len]
             pred_value[batch_idx:, :len(pred)] = pred[:min(len(pred), value_label.size(1))]
         mask = ((value_label == pred_value).sum(dim=1)/value_label.size(1) != 1)
+        mask.masked_fill_((gate_label != ontology.gate_dict["prediction"]), False)  # if gate is none or don't care, ignore value in accuracy
         acc.masked_fill_(mask, 0)  # fail to predict value
 
         return loss, acc

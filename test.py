@@ -20,7 +20,7 @@ def test(model, reader, hparams):
     joint_acc = 0
     with torch.no_grad():
         iterator = reader.make_batch(reader.test)
-        t = tqdm(enumerate(iterator), total=test.max_iter)
+        t = tqdm(enumerate(iterator), total=test.max_iter, ncols=150)
         for batch_idx, batch in t:
             inputs, contexts, spans = reader.make_input(batch)
             turns = len(inputs)
@@ -56,8 +56,8 @@ def test(model, reader, hparams):
                 joint_acc += (joint.mean(dim=1) == 1).sum(dim=0).item()
             t.set_description("iter: {}".format(batch_idx+1))
             time.sleep(0.1)
-    slot_acc = slot_acc / slot_count
-    joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots))
+    slot_acc = slot_acc / slot_count * 100
+    joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots)) * 100
 
     return joint_acc, slot_acc
 

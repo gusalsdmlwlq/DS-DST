@@ -5,7 +5,7 @@ class Config:
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--data_path", default="data/MultiWOZ_2.1", type=str)
-    parser.add_argument("--batch_size", default=8, type=int)
+    parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--max_len", default=100, type=int)
     parser.add_argument("--max_value_len", default=20, type=int)
     parser.add_argument("--max_context_len", default=490, type=int)

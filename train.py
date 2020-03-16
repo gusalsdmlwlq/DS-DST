@@ -30,7 +30,7 @@ def learning_rate_schedule(global_step, max_iter, hparams):
 
 def train(model, reader, optimizer, writer, hparams):
     iterator = reader.make_batch(reader.train)
-    t = tqdm(enumerate(iterator), total=train.max_iter)
+    t = tqdm(enumerate(iterator), total=train.max_iter, ncols=150)
     for batch_idx, batch in t:
         inputs, contexts, spans = reader.make_input(batch)
         turns = len(inputs)
@@ -67,7 +67,7 @@ def train(model, reader, optimizer, writer, hparams):
                     small_contexts = contexts[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
                     small_spans = spans[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
                     optimizer.zero_grad()
-                    loss, acc = model.forward(small_inputs, small_contexts, small_spans, slot_idx)
+                    loss, acc = model.forward(small_inputs, small_contexts, small_spans, slot_idx)  # acc: [batch]
 
                     total_loss += loss.item() * small_contexts.size(0)
                     loss_count += small_contexts.size(0)
@@ -89,8 +89,8 @@ def train(model, reader, optimizer, writer, hparams):
         #         torch.cuda.empty_cache()
 
         total_loss = total_loss / loss_count
-        slot_acc = slot_acc / slot_count
-        joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots))
+        slot_acc = slot_acc / slot_count * 100
+        joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots)) * 100
         train.global_step += 1
         writer.add_scalar("Train/loss", total_loss, train.global_step)
         t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
@@ -106,7 +106,7 @@ def validate(model, reader, hparams):
     joint_acc = 0
     with torch.no_grad():
         iterator = reader.make_batch(reader.dev)
-        t = tqdm(enumerate(iterator), total=validate.max_iter)
+        t = tqdm(enumerate(iterator), total=validate.max_iter, ncols=150)
         for batch_idx, batch in t:
             inputs, contexts, spans = reader.make_input(batch)
             turns = len(inputs)
@@ -133,7 +133,7 @@ def validate(model, reader, hparams):
                             small_inputs[key] = value[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
                         small_contexts = contexts[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
                         small_spans = spans[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                        loss, acc = model.forward(small_inputs, small_contexts, small_spans, slot_idx, train=False)  # acc: [batch]
+                        loss, acc = model.forward(small_inputs, small_contexts, small_spans, slot_idx, train=False)
                         
                         val_loss += loss.item() * small_contexts.size(0)
                         loss_count += small_contexts.size(0)
@@ -146,8 +146,8 @@ def validate(model, reader, hparams):
             time.sleep(0.1)
     model.train()
     val_loss = val_loss / loss_count
-    slot_acc = slot_acc / slot_count
-    joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots))
+    slot_acc = slot_acc / slot_count * 100
+    joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots)) * 100
 
     return val_loss, joint_acc, slot_acc
 

@@ -167,7 +167,7 @@ class Reader:
                         batch[cur_turn][key].append(turn[key])
             all_batches.append(batch)
         random.shuffle(all_batches)
-        for batch in all_batches[:2]:
+        for batch in all_batches:
             yield batch
 
     def find_span(self, context, value):
