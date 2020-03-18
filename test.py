@@ -39,7 +39,7 @@ def test(model, reader, hparams):
                 else:
                     small_batch_size = batch_size
 
-                joint = torch.zeros((batch_size), len(ontology.all_info_slots))  # joint: [batch, slots]
+                joint = torch.zeros((batch_size, len(ontology.all_info_slots)))  # joint: [batch, slots]
                 for slot_idx in range(len(ontology.all_info_slots)):
                     for small_batch_idx in range(math.ceil(batch_size/small_batch_size)):
                         small_inputs = {}
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     model = DST(hparams).to(device)
     model = amp.initialize(model, opt_level="O1", verbosity=0)
     model = torch.nn.DataParallel(model)
-    
+
     load(model, save_path)  # load saved model, optimizer
 
     test.max_iter = len(list(reader.make_batch(reader.test)))

@@ -30,9 +30,9 @@ class DST(nn.Module):
         Outputs:
             loss if train
             joint_acc, slot_acc else
-            loss: Sum of gate loss, span loss and value loss.
-            
+            loss: Sum of gate loss, span loss and value loss. 
         """
+        
         super(DST, self).__init__()
         self.context_encoder = BertModel.from_pretrained("bert-base-uncased")  # use fine-tuning
         self.context_encoder.train()

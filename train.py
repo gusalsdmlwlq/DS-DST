@@ -58,7 +58,7 @@ def train(model, reader, optimizer, writer, hparams):
             else:
                 small_batch_size = batch_size
 
-            joint = torch.zeros((batch_size), len(ontology.all_info_slots))  # joint: [batch, slots]
+            joint = torch.zeros((batch_size, len(ontology.all_info_slots)))  # joint: [batch, slots]
             for slot_idx in range(len(ontology.all_info_slots)):
                 for small_batch_idx in range(math.ceil(batch_size/small_batch_size)):
                     small_inputs = {}

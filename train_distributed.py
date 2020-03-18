@@ -71,7 +71,7 @@ def train(model, reader, optimizer, writer, hparams):
 
         for turn_idx in range(turns):
             distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
-
+            
             # split batches for gpu memory
             context_len = contexts[turn_idx].size(1)
             if context_len >= 410:
@@ -82,14 +82,14 @@ def train(model, reader, optimizer, writer, hparams):
                 small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
             else:
                 small_batch_size = distributed_batch_size
-
+            
             # distribute batches to each gpu
             for key, value in inputs[turn_idx].items():
                 inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
             contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
             spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
 
-            joint = torch.zeros((distributed_batch_size), len(ontology.all_info_slots))  # joint: [batch, slots]
+            joint = torch.zeros((distributed_batch_size, len(ontology.all_info_slots)))  # joint: [batch, slots]
             for slot_idx in range(len(ontology.all_info_slots)):
                 for small_batch_idx in range(math.ceil(distributed_batch_size/small_batch_size)):
                     small_inputs = {}
@@ -126,7 +126,7 @@ def train(model, reader, optimizer, writer, hparams):
             t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
 
 def validate(model, reader, hparams):
-    model.eval()
+    # model.eval()
     val_loss = 0
     loss_count = 0
     slot_acc = 0
@@ -134,10 +134,9 @@ def validate(model, reader, hparams):
     joint_acc = 0
     with torch.no_grad():
         iterator = reader.make_batch(reader.dev)
-        t = tqdm(enumerate(iterator), total=validate.max_iter, ncols=150)
 
         if hparams.local_rank == 0:
-            t = tqdm(enumerate(iterator), total=train.max_iter, ncols=150)
+            t = tqdm(enumerate(iterator), total=validate.max_iter, ncols=150)
         else:
             t = enumerate(iterator)
 
@@ -148,40 +147,25 @@ def validate(model, reader, hparams):
             batch_size = contexts[0].size(0)
 
             for turn_idx in range(turns):
-                # split batches for gpu memory
-                context_len = contexts[turn_idx].size(1)
-                if context_len >= 410:
-                    small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 8), distributed_batch_size)
-                elif context_len >= 260:
-                    small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 4), distributed_batch_size)
-                elif context_len >= 160:
-                    small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
-                else:
-                    small_batch_size = distributed_batch_size
+                distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
 
                 for key, value in inputs[turn_idx].items():
-                    inputs[turn_idx][key] = distribute_data(value[:distributed_batch_size, :], hparams.num_gpus)[hparams.local_rank]
-                contexts[turn_idx] = distribute_data(contexts[turn_idx][:distributed_batch_size, :], hparams.num_gpus)[hparams.local_rank]
-                spans[turn_idx] = distribute_data(spans[turn_idx][:distributed_batch_size, :, :], hparams.num_gpus)[hparams.local_rank]
+                    inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
+                contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
+                spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
 
-                joint = torch.zeros((distributed_batch_size), len(ontology.all_info_slots))  # joint: [batch, slots]
+                joint = torch.zeros((distributed_batch_size, len(ontology.all_info_slots)))  # joint: [batch, slots]
                 for slot_idx in range(len(ontology.all_info_slots)):
-                    for small_batch_idx in range(math.ceil(distributed_batch_size/small_batch_size)):
-                        small_inputs = {}
-                        for key, value in inputs[turn_idx].items():
-                            small_inputs[key] = value[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                        small_contexts = contexts[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                        small_spans = spans[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                        loss, acc = model.forward(small_inputs, small_contexts, small_spans, slot_idx, train=False)
-                        
-                        loss = loss.mean()
+                    loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], slot_idx, train=False)
 
-                        val_loss += loss.item() * small_contexts.size(0)
-                        loss_count += small_contexts.size(0)
-                        slot_acc += acc.sum(dim=0).item()
-                        slot_count += small_contexts.size(0)
-                        joint[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1), slot_idx] = acc
-                        torch.cuda.empty_cache()
+                    loss = loss.mean()
+
+                    val_loss += loss.item() * contexts[0].size(0)
+                    loss_count += contexts[0].size(0)
+                    slot_acc += acc.sum(dim=0).item()
+                    slot_count += contexts[0].size(0)
+                    joint[:, slot_idx] = acc
+                    torch.cuda.empty_cache()
 
                 joint_acc += (joint.mean(dim=1) == 1).sum(dim=0).item()
 
@@ -266,6 +250,7 @@ if __name__ == "__main__":
     train.global_step = 0
     max_joint_acc = 0
     early_stop_count = hparams.early_stop_count
+
     for epoch in range(hparams.max_epochs):
         logger.info("Train...")
         start = time.time()
