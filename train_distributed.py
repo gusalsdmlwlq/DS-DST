@@ -116,7 +116,7 @@ def train(model, reader, optimizer, writer, hparams):
                     torch.cuda.empty_cache()
                     
             joint_acc += (joint.mean(dim=1) == 1).sum(dim=0).item()
-            print("@@@")
+            
         total_loss = total_loss / loss_count
         slot_acc = slot_acc / slot_count * 100
         joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots)) * 100
