@@ -114,9 +114,9 @@ def train(model, reader, optimizer, writer, hparams):
 
                     optimizer.step()
                     torch.cuda.empty_cache()
-
+                    
             joint_acc += (joint.mean(dim=1) == 1).sum(dim=0).item()
-
+            print("@@@")
         total_loss = total_loss / loss_count
         slot_acc = slot_acc / slot_count * 100
         joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots)) * 100
@@ -188,7 +188,7 @@ def save(model, optimizer, save_path):
     torch.save(checkpoint, save_path)
 
 def load(model, optimizer, save_path):
-    checkpoint = torch.load(save_path)
+    checkpoint = torch.load(save_path, map_location = lambda storage, loc: storage.cuda(hparams.local_rank))
     model.load_state_dict(checkpoint["model"])
     optimizer.load_state_dict(checkpoint["optimizer"])
     amp.load_state_dict(checkpoint["amp"])
@@ -233,15 +233,15 @@ if __name__ == "__main__":
     end = time.time()
     logger.info("Loaded. {} secs".format(end-start))
 
-    device = torch.device("cpu" if hparams.no_cuda else "cuda")
-    model = DST(hparams).to(device)    
+    model = DST(hparams).cuda()
     optimizer = Adam(model.parameters(), hparams.lr)
     model, optimizer = amp.initialize(model, optimizer, opt_level="O1", verbosity=0)
-    model = parallel.DistributedDataParallel(model, delay_allreduce=True)
+    model = parallel.DistributedDataParallel(model)
 
     # load saved model, optimizer
     if hparams.save_path is not None:
-        load(hparams.save_path)
+        load(model, optimizer, hparams.save_path)
+        torch.distributed.barrier()
 
     train.max_iter = len(list(reader.make_batch(reader.train)))
     validate.max_iter = len(list(reader.make_batch(reader.dev)))
@@ -272,6 +272,7 @@ if __name__ == "__main__":
         if joint_acc > max_joint_acc:  # save model
             if hparams.local_rank == 0:
                 save(model, optimizer, save_path)
+            torch.distributed.barrier()  # synchronize
             logger.info("Saved to {}.".format(os.path.abspath(save_path)))
             max_joint_acc = joint_acc
             early_stop_count = hparams.early_stop_count

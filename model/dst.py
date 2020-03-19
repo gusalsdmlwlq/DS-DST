@@ -42,8 +42,9 @@ class DST(nn.Module):
         self.linear_gate = nn.Linear(self.hidden_size, 3)  # none, don't care, prediction
         self.linear_span = nn.Linear(self.hidden_size, 2)  # start, end
         self.value_ontology = json.load(open(os.path.join(hparams.data_path, "ontology_processed.json"), "r"))
+        self.gate_loss_weight = torch.tensor([0.5, 1.0, 1.0])
+        self.gate_criterion = torch.nn.NLLLoss(weight=self.gate_loss_weight, reduction="none")
 
-        self.device = torch.device("cpu" if hparams.no_cuda else "cuda")
         self.margin = hparams.margin
         self.use_span = hparams.use_span  # default False
 
@@ -59,12 +60,12 @@ class DST(nn.Module):
         turn_context: [batch, context_len]
         turn_span: [bathc, slots, 2]
         """
-
+    
         batch_size = turn_context.size(0)
         slot_ = ontology.all_info_slots[slot_idx]
         slot = torch.tensor(self.tokenizer.encode(" ".join(slot_.split("-"))))
         slot_len = slot.size(0)
-        slot = slot.expand((batch_size, slot_len)).to(self.device)  # slot: [batch, slot_len]
+        slot = slot.expand((batch_size, slot_len)).cuda()  # slot: [batch, slot_len]
 
         context = torch.cat([slot, turn_context], dim=1)  # context: [batch, slot_len+context_len]
         context_mask = (context != 0)
@@ -74,7 +75,7 @@ class DST(nn.Module):
         gate_output = F.log_softmax(gate_output, dim=1)
 
         gate_label = turn_input["gate"][:, slot_idx]  # gate_label: [batch]
-        loss_gate = F.nll_loss(gate_output, gate_label, reduction="none")
+        loss_gate = self.gate_criterion(gate_output, gate_label)
 
         if self.use_span:  # use span-based method
             span_outputs = None
@@ -100,7 +101,7 @@ class DST(nn.Module):
         value_list = self.value_ontology[slot_] + ["none"]
         for value in value_list:
             value_output = torch.tensor([self.tokenizer.encode(value)])
-            value_output = value_output.to(self.device)
+            value_output = value_output.cuda()
             value_output, _ = self.value_encoder(value_output)  # value_outputs: [1, value_len, hidden]
             value_prob = torch.cosine_similarity(outputs[:, 0, :], value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # value_prob: [batch, 1]
             if value_probs is None:
@@ -129,15 +130,15 @@ class DST(nn.Module):
         # if train:
         #     return loss
         # else:
-        acc = torch.ones(batch_size).to(self.device)  # acc: [batch]
+        acc = torch.ones(batch_size).cuda()  # acc: [batch]
         
         mask = (gate_label != gate_output.argmax(dim=1))
         acc.masked_fill_(mask, 0)  # fail to predict gate
 
-        pred_value = torch.zeros_like(value_label).to(self.device)  # pred_value: [batch, value_len]
+        pred_value = torch.zeros_like(value_label).cuda()  # pred_value: [batch, value_len]
         value_probs = value_probs.argmax(dim=1)  # value_probs: [batch]
         for batch_idx in range(batch_size):
-            pred = torch.tensor(self.tokenizer.encode(value_list[value_probs[batch_idx]])).to(self.device)  # pred: [value_len]
+            pred = torch.tensor(self.tokenizer.encode(value_list[value_probs[batch_idx]])).cuda()  # pred: [value_len]
             pred_value[batch_idx:, :len(pred)] = pred[:min(len(pred), value_label.size(1))]
         mask = ((value_label == pred_value).sum(dim=1)/value_label.size(1) != 1)
         mask.masked_fill_((gate_label != ontology.gate_dict["prediction"]), False)  # if gate is none or don't care, ignore value in accuracy

@@ -71,7 +71,7 @@ def train(model, reader, optimizer, writer, hparams):
 
                     # for multi GPU training
                     loss = loss.mean()
-
+                    
                     total_loss += loss.item() * small_contexts.size(0)
                     loss_count += small_contexts.size(0)
                     slot_acc += acc.sum(dim=0).item()
@@ -197,15 +197,14 @@ if __name__ == "__main__":
     end = time.time()
     logger.info("Loaded. {} secs".format(end-start))
 
-    device = torch.device("cpu" if hparams.no_cuda else "cuda")
-    model = DST(hparams).to(device)    
+    model = DST(hparams).cuda()
     optimizer = Adam(model.parameters(), hparams.lr)
     model, optimizer = amp.initialize(model, optimizer, opt_level="O1", verbosity=0)
     model = torch.nn.DataParallel(model)
 
     # load saved model, optimizer
     if hparams.save_path is not None:
-        load(hparams.save_path)
+        load(model, optimizer, hparams.save_path)
 
     train.max_iter = len(list(reader.make_batch(reader.train)))
     validate.max_iter = len(list(reader.make_batch(reader.dev)))

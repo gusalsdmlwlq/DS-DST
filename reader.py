@@ -21,7 +21,6 @@ class Reader:
         self.max_len = hparams.max_len
         self.max_value_len = hparams.max_value_len
         self.max_context_len = hparams.max_context_len
-        self.cuda = False if hparams.no_cuda else True  # default: True
 
     def load_data(self, mode="train"):
         """Load train/dev/test data.
@@ -265,9 +264,8 @@ class Reader:
                     max_len = len_
             turn_input["action"] = act_[:, :max_len].clone().long()
             
-            if self.cuda:
-                for key, value in turn_input.items():
-                    turn_input[key] = value.cuda()
+            for key, value in turn_input.items():
+                turn_input[key] = value.cuda()
 
             inputs.append(turn_input)
 
@@ -283,8 +281,7 @@ class Reader:
                     prev_resp.append(resp[1:-1])
                 turn_context_ = turn_context_[:, :context_len]
                 
-                if self.cuda:
-                    turn_context_ = turn_context_.cuda()
+                turn_context_ = turn_context_.cuda()
                 
                 contexts.append(turn_context_.clone().long())
             else:  # not first turn
@@ -303,8 +300,7 @@ class Reader:
                     prev_resp.append(resp[1:-1])
                 turn_context_ = turn_context_[:, :min(context_len, self.max_context_len)]
 
-                if self.cuda:
-                    turn_context_ = turn_context_.cuda()
+                turn_context_ = turn_context_.cuda()
 
                 contexts.append(turn_context_.clone().long())
             
@@ -315,8 +311,7 @@ class Reader:
                     if gate_ == ontology.gate_dict["prediction"]:
                         turn_spans[bidx][idx] = torch.tensor(self.find_span(turn_context[bidx], batch[turn]["belief"][bidx][idx]))
             
-            if self.cuda:
-                turn_spans = turn_spans.cuda()
+            turn_spans = turn_spans.cuda()
             
             spans.append(turn_spans)
 
