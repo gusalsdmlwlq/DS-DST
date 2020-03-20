@@ -83,21 +83,12 @@ def train(model, reader, optimizer, writer, hparams):
                     torch.cuda.empty_cache()
             joint_acc += (joint.mean(dim=1) == 1).sum(dim=0).item()
 
-        # for turn_idx in range(turns):
-        #     for slot_idx in range(len(ontology.all_info_slots)):
-        #         optimizer.zero_grad()
-        #         loss = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], slot_idx)
-        #         loss.backward()
-        #         optimizer.step()
-        #         torch.cuda.empty_cache()
-
         total_loss = total_loss / loss_count
         slot_acc = slot_acc / slot_count * 100
         joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots)) * 100
         train.global_step += 1
         writer.add_scalar("Train/loss", total_loss, train.global_step)
         t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
-        time.sleep(0.1)
         # logger.info("iter: {}, loss: {}".format(batch_idx+1, loss.item()))
 
 def validate(model, reader, hparams):
@@ -146,10 +137,13 @@ def validate(model, reader, hparams):
                         slot_count += small_contexts.size(0)
                         joint[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1), slot_idx] = acc
                         torch.cuda.empty_cache()
+
                 joint_acc += (joint.mean(dim=1) == 1).sum(dim=0).item()
+
             t.set_description("iter: {}".format(batch_idx+1))
-            time.sleep(0.1)
+
     model.train()
+    model.value_encoder.eval()  # fix value encoder
     val_loss = val_loss / loss_count
     slot_acc = slot_acc / slot_count * 100
     joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots)) * 100
@@ -179,11 +173,8 @@ if __name__ == "__main__":
     logger.setLevel(logging.INFO)
     stream_handler = logging.StreamHandler()
     logger.addHandler(stream_handler)
-
-    if not os.path.exists("log"):
-        os.mkdir("log")
-    log_path = os.path.join("log", "{}".format(re.sub("\s+", "_", time.asctime())))
-    writer = SummaryWriter(log_dir=log_path)
+    
+    writer = SummaryWriter()
 
     if not os.path.exists("save"):
         os.mkdir("save")

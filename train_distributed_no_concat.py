@@ -12,8 +12,9 @@ from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 from apex import amp, parallel
 from tqdm import tqdm
+from transformers import BertTokenizerFast
 
-from model.dst import DST
+from model.dst_no_concat import DST
 from config import Config
 from reader import Reader
 import ontology
@@ -46,7 +47,7 @@ def distribute_data(batches, num_gpus):
             distributed_data.append(expanded_batches[batch_size*idx:batch_size*(idx+1)])
     return distributed_data
 
-def train(model, reader, optimizer, writer, hparams):
+def train(model, reader, optimizer, writer, hparams, tokenizer):
     iterator = reader.make_batch(reader.train)
 
     if hparams.local_rank == 0:  # only one process prints something
@@ -56,82 +57,83 @@ def train(model, reader, optimizer, writer, hparams):
 
     for batch_idx, batch in t:
         inputs, contexts, spans = reader.make_input(batch)
+        batch_size = contexts[0].size(0)
+
         turns = len(inputs)
         total_loss = 0
-        loss_count = 0  # number of small batches in a iteration
         slot_acc = 0
-        slot_count = 0
         joint_acc = 0
+        batch_count = 0  # number of batches
 
         # learning rate scheduling
         for param in optimizer.param_groups:
             param["lr"] = learning_rate_schedule(train.global_step, train.max_iter, hparams)
 
-        batch_size = contexts[0].size(0)
-
         for turn_idx in range(turns):
+            # concat [CLS] & [SEP] to context
+            bos = torch.tensor([tokenizer.cls_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # bos: [batch, 1]
+            eos = torch.tensor([tokenizer.sep_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # eos: [batch, 1]
+            contexts[turn_idx] = torch.cat([bos, contexts[turn_idx], eos], dim=1)
+
             distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
             
             # split batches for gpu memory
             context_len = contexts[turn_idx].size(1)
             if context_len >= 410:
                 small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 8), distributed_batch_size)
-            elif context_len >= 260:
+            if context_len >= 260:
                 small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 4), distributed_batch_size)
             elif context_len >= 160:
                 small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
             else:
                 small_batch_size = distributed_batch_size
-            
+
             # distribute batches to each gpu
             for key, value in inputs[turn_idx].items():
                 inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
             contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
             spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
 
-            joint = torch.zeros((distributed_batch_size, len(ontology.all_info_slots)))  # joint: [batch, slots]
-            for slot_idx in range(len(ontology.all_info_slots)):
-                for small_batch_idx in range(math.ceil(distributed_batch_size/small_batch_size)):
-                    small_inputs = {}
-                    for key, value in inputs[turn_idx].items():
-                        small_inputs[key] = value[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                    small_contexts = contexts[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                    small_spans = spans[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                    optimizer.zero_grad()
-                    loss, acc = model.forward(small_inputs, small_contexts, small_spans, slot_idx)  # loss: [batch], acc: [batch]
+            for small_batch_idx in range(math.ceil(distributed_batch_size/small_batch_size)):
+                small_inputs = {}
+                for key, value in inputs[turn_idx].items():
+                    small_inputs[key] = value[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
+                small_contexts = contexts[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
+                small_spans = spans[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
+                
+                optimizer.zero_grad()
 
-                    loss = loss.mean()
+                loss, acc = model.forward(small_inputs, small_contexts, small_spans)  # loss: [batch], acc: [batch, slot]
 
-                    total_loss += loss.item() * small_contexts.size(0)
-                    loss_count += small_contexts.size(0)
-                    slot_acc += acc.sum(dim=0).item()
-                    slot_count += small_contexts.size(0)
-                    joint[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1), slot_idx] = acc
-                    
-                    # distributed training
-                    with amp.scale_loss(loss, optimizer) as scaled_loss:
-                        scaled_loss.backward()
+                total_loss += loss.sum(dim=0).item()
+                slot_acc += acc.sum(dim=1).sum(dim=0).item()
+                joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
+                
+                batch_count += small_batch_size
+                
+                loss = loss.mean(dim=0)
 
-                    optimizer.step()
-                    torch.cuda.empty_cache()
-                    
-            joint_acc += (joint.mean(dim=1) == 1).sum(dim=0).item()
+                # distributed training
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+
+                optimizer.step()
+                torch.cuda.empty_cache()
             
-        total_loss = total_loss / loss_count
-        slot_acc = slot_acc / slot_count * 100
-        joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots)) * 100
+        total_loss = total_loss / batch_count
+        slot_acc = slot_acc / batch_count / len(ontology.all_info_slots) * 100
+        joint_acc = joint_acc / batch_count * 100
         train.global_step += 1
         if hparams.local_rank == 0:
             writer.add_scalar("Train/loss", total_loss, train.global_step)
             t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
 
-def validate(model, reader, hparams):
+def validate(model, reader, hparams, tokenizer):
     # model.eval()
     val_loss = 0
-    loss_count = 0
     slot_acc = 0
-    slot_count = 0
     joint_acc = 0
+    batch_count = 0
     with torch.no_grad():
         iterator = reader.make_batch(reader.dev)
 
@@ -142,41 +144,40 @@ def validate(model, reader, hparams):
 
         for batch_idx, batch in t:
             inputs, contexts, spans = reader.make_input(batch)
-            turns = len(inputs)
-
             batch_size = contexts[0].size(0)
 
+            turns = len(inputs)
+
             for turn_idx in range(turns):
+                bos = torch.tensor([tokenizer.cls_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # bos: [batch, 1]
+                eos = torch.tensor([tokenizer.sep_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # eos: [batch, 1]
+                contexts[turn_idx] = torch.cat([bos, contexts[turn_idx], eos], dim=1)
+
                 distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
 
                 for key, value in inputs[turn_idx].items():
                     inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
                 contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
                 spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
+                
+                loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], train=False)
+            
+                val_loss += loss.sum(dim=0).item()
+                slot_acc += acc.sum(dim=1).sum(dim=0).item()
+                joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
 
-                joint = torch.zeros((distributed_batch_size, len(ontology.all_info_slots)))  # joint: [batch, slots]
-                for slot_idx in range(len(ontology.all_info_slots)):
-                    loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], slot_idx, train=False)
+                batch_count += batch_size
 
-                    loss = loss.mean()
-
-                    val_loss += loss.item() * contexts[0].size(0)
-                    loss_count += contexts[0].size(0)
-                    slot_acc += acc.sum(dim=0).item()
-                    slot_count += contexts[0].size(0)
-                    joint[:, slot_idx] = acc
-                    torch.cuda.empty_cache()
-
-                joint_acc += (joint.mean(dim=1) == 1).sum(dim=0).item()
+                torch.cuda.empty_cache()
 
             if hparams.local_rank == 0:
                 t.set_description("iter: {}".format(batch_idx+1))
 
     model.train()
     model.value_encoder.eval()  # fix value encoder
-    val_loss = val_loss / loss_count
-    slot_acc = slot_acc / slot_count * 100
-    joint_acc = joint_acc / (slot_count / len(ontology.all_info_slots)) * 100
+    val_loss = val_loss / batch_count
+    slot_acc = slot_acc / batch_count / len(ontology.all_info_slots) * 100
+    joint_acc = joint_acc / batch_count * 100
 
     return val_loss, joint_acc, slot_acc
 
@@ -217,9 +218,6 @@ if __name__ == "__main__":
         logger.setLevel(logging.WARNING)
     
     if hparams.local_rank == 0:
-        # if not os.path.exists("log"):
-        #     os.mkdir("log")
-        # log_path = os.path.join("log", "{}".format(re.sub("\s+", "_", time.asctime())))
         writer = SummaryWriter()
 
         if not os.path.exists("save"):
@@ -233,6 +231,8 @@ if __name__ == "__main__":
     reader.load_data("train")
     end = time.time()
     logger.info("Loaded. {} secs".format(end-start))
+
+    tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
     model = DST(hparams).cuda()
     optimizer = Adam(model.parameters(), hparams.lr)
@@ -256,14 +256,14 @@ if __name__ == "__main__":
         logger.info("Train...")
         start = time.time()
         if hparams.local_rank == 0:
-            train(model, reader, optimizer, writer, hparams)
+            train(model, reader, optimizer, writer, hparams, tokenizer)
         else:
-            train(model, reader, optimizer, None, hparams)
+            train(model, reader, optimizer, None, hparams, tokenizer)
         end = time.time()
         logger.info("epoch: {}, {:.4f} secs".format(epoch+1, end-start))
 
         logger.info("Validate...")
-        loss, joint_acc, slot_acc = validate(model, reader, hparams)
+        loss, joint_acc, slot_acc = validate(model, reader, hparams, tokenizer)
         logger.info("loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(loss, joint_acc, slot_acc))
         if hparams.local_rank == 0:
             writer.add_scalar("Val/loss", loss, epoch+1)

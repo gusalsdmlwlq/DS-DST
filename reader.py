@@ -21,6 +21,7 @@ class Reader:
         self.max_len = hparams.max_len
         self.max_value_len = hparams.max_value_len
         self.max_context_len = hparams.max_context_len
+        self.no_history = hparams.no_history
 
     def load_data(self, mode="train"):
         """Load train/dev/test data.
@@ -287,7 +288,10 @@ class Reader:
             else:  # not first turn
                 turn_context_ = torch.zeros((batch_size, self.max_context_len))
                 for idx, resp in enumerate(prev_resp):
-                    turn_context[idx] += resp
+                    if self.no_history:
+                        turn_context[idx] = resp
+                    else:
+                        turn_context[idx] += resp
                 prev_resp = []
                 for idx, user in enumerate(batch[turn]["user"]):
                     turn_context[idx] += user[1:-1]
