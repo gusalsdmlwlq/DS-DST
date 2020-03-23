@@ -125,6 +125,7 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                 print("\n!!! Error: {}".format(e))
                 print("batch size: {}, context length: {}".format(small_batch_size, context_len))
             torch.cuda.empty_cache()
+            exit(0)
 
 def validate(model, reader, hparams, tokenizer):
     model.eval()
@@ -160,7 +161,7 @@ def validate(model, reader, hparams, tokenizer):
                 slot_acc += acc.sum(dim=1).sum(dim=0).item()
                 joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
 
-                batch_count += batch_size
+                batch_count += distributed_batch_size
 
                 torch.cuda.empty_cache()
 
