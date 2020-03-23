@@ -272,7 +272,7 @@ class Reader:
 
             # make context
             if turn == 0:  # first turn
-                turn_context_ = torch.zeros((batch_size, self.max_context_len))
+                turn_context_ = torch.zeros((batch_size, self.max_context_len+2))
                 for idx, user in enumerate(batch[turn]["user"]):
                     turn_context.append(user[1:-1])
                     if context_len < len(turn_context[idx]):
@@ -286,7 +286,7 @@ class Reader:
                 
                 contexts.append(turn_context_.clone().long())
             else:  # not first turn
-                turn_context_ = torch.zeros((batch_size, self.max_context_len))
+                turn_context_ = torch.zeros((batch_size, self.max_context_len+2))  # 2 for [CLS] & [SEP]
                 for idx, resp in enumerate(prev_resp):
                     if self.no_history:
                         turn_context[idx] = resp
@@ -315,7 +315,7 @@ class Reader:
                     if gate_ == ontology.gate_dict["prediction"]:
                         turn_spans[bidx][idx] = torch.tensor(self.find_span(turn_context[bidx], batch[turn]["belief"][bidx][idx]))
                         turn_spans[bidx][idx] += 1  # for [CLS]
-                        
+
             turn_spans = turn_spans.cuda()
             
             spans.append(turn_spans)
