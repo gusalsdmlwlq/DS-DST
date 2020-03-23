@@ -250,7 +250,11 @@ class Reader:
                     belief_[idx, s_idx, :len_] = torch.tensor(value[:self.max_value_len])
                     if len_ > max_len:
                         max_len = len_
-            turn_input["belief"] = belief_[:, :, :max_len].clone().long()
+
+            if self.no_history:
+                turn_input["belief"] = batch[turn]["belief"]  # use list instead of tensor
+            else:
+                turn_input["belief"] = belief_[:, :, :max_len].clone().long()
 
             # make tensor of gate
             turn_input["gate"] = torch.tensor(batch[turn]["gate"])
@@ -266,48 +270,58 @@ class Reader:
             turn_input["action"] = act_[:, :max_len].clone().long()
             
             for key, value in turn_input.items():
-                turn_input[key] = value.cuda()
+                if key != "belief":
+                    turn_input[key] = value.cuda()
 
             inputs.append(turn_input)
 
             # make context
-            if turn == 0:  # first turn
-                turn_context_ = torch.zeros((batch_size, self.max_context_len+2))
-                for idx, user in enumerate(batch[turn]["user"]):
-                    turn_context.append(user[1:-1])
-                    if context_len < len(turn_context[idx]):
-                        context_len = len(turn_context[idx])
-                    turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
-                for resp in batch[turn]["response"]:
-                    prev_resp.append(resp[1:-1])
-                turn_context_ = turn_context_[:, :context_len+2]
-                
-                turn_context_ = turn_context_.cuda()
-                
-                contexts.append(turn_context_.clone().long())
-            else:  # not first turn
-                turn_context_ = torch.zeros((batch_size, self.max_context_len+2))  # 2 for [CLS] & [SEP]
-                for idx, resp in enumerate(prev_resp):
-                    if self.no_history:
+            if self.no_history:
+                if turn == 0:
+                    for idx, user in enumerate(batch[turn]["user"]):
+                        turn_context.append(user[1:-1])
+                        prev_resp.append(batch[turn]["response"][idx][1:-1])
+                else:
+                    for idx, resp in enumerate(prev_resp):
                         turn_context[idx] = resp
-                    else:
+                        turn_context[idx] += batch[turn]["user"][idx][1:-1]
+                        prev_resp[idx] = batch[turn]["response"][idx][1:-1]
+                contexts.append(turn_context)
+            else:
+                if turn == 0:  # first turn
+                    turn_context_ = torch.zeros((batch_size, self.max_context_len+2))
+                    for idx, user in enumerate(batch[turn]["user"]):
+                        turn_context.append(user[1:-1])
+                        if context_len < len(turn_context[idx]):
+                            context_len = len(turn_context[idx])
+                        turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
+                    for resp in batch[turn]["response"]:
+                        prev_resp.append(resp[1:-1])
+                    turn_context_ = turn_context_[:, :context_len+2]
+                    
+                    turn_context_ = turn_context_.cuda()
+                    
+                    contexts.append(turn_context_.clone().long())
+                else:  # not first turn
+                    turn_context_ = torch.zeros((batch_size, self.max_context_len+2))  # 2 for [CLS] & [SEP]
+                    for idx, resp in enumerate(prev_resp):
                         turn_context[idx] += resp
-                prev_resp = []
-                for idx, user in enumerate(batch[turn]["user"]):
-                    turn_context[idx] += user[1:-1]
-                    if context_len < len(turn_context[idx]):
-                        context_len = len(turn_context[idx])
-                    if len(turn_context[idx]) > self.max_context_len:  # cut long contexts for BERT's input
-                        turn_context[idx] = turn_context[idx][-self.max_context_len:]
-                    turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
-                for resp in batch[turn]["response"]:
-                    prev_resp.append(resp[1:-1])
-                turn_context_ = turn_context_[:, :min(context_len, self.max_context_len)+2]
+                    prev_resp = []
+                    for idx, user in enumerate(batch[turn]["user"]):
+                        turn_context[idx] += user[1:-1]
+                        if context_len < len(turn_context[idx]):
+                            context_len = len(turn_context[idx])
+                        if len(turn_context[idx]) > self.max_context_len:  # cut long contexts for BERT's input
+                            turn_context[idx] = turn_context[idx][-self.max_context_len:]
+                        turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
+                    for resp in batch[turn]["response"]:
+                        prev_resp.append(resp[1:-1])
+                    turn_context_ = turn_context_[:, :min(context_len, self.max_context_len)+2]
 
-                turn_context_ = turn_context_.cuda()
+                    turn_context_ = turn_context_.cuda()
 
-                contexts.append(turn_context_.clone().long())
-            
+                    contexts.append(turn_context_.clone().long())
+                
             # make value span 
             turn_spans = torch.zeros((batch_size, len(ontology.all_info_slots), 2), dtype=torch.int64)
             for bidx, gate in enumerate(batch[turn]["gate"]):
