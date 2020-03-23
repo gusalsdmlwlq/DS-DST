@@ -131,12 +131,12 @@ class DST(nn.Module):
 
         # find max cosine similarity with context except true value
         true_value_mask = torch.zeros((batch_size, len(value_list)), dtype=torch.bool).cuda()  # true_value_mask: [batch, value_nums]
-            for idx in range(batch_size):
-                for v_idx, v in enumerate(value_list):
-                    v = self.tokenizer.encode(v)
-                    if v == value_label[idx][:len(v)]:
-                        true_value_mask[idx, v_idx] = True
-                        break
+        for idx in range(batch_size):
+            for v_idx, v in enumerate(value_list):
+                v = self.tokenizer.encode(v)
+                if v == value_label[idx][:len(v)]:
+                    true_value_mask[idx, v_idx] = True
+                    break
         value_probs.masked_fill_(true_value_mask, -1.0)
         max_value_probs = value_probs.max(dim=1, keepdim=True)[0]  # max_value_probs: [batch, 1]
         loss_value = torch.max(torch.cat([torch.zeros_like(true_value_probs), self.margin - true_value_probs + max_value_probs], dim=1),dim=1)[0]  # loss_value: [batch]
