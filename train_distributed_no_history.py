@@ -14,7 +14,7 @@ from apex import amp, parallel
 from tqdm import tqdm
 from transformers import BertTokenizerFast
 
-from model.dst_no_concat import DST
+from model.dst_no_history import DST
 from config import Config
 from reader import Reader
 import ontology
@@ -37,14 +37,15 @@ def distribute_data(batches, num_gpus):
             distributed_data.append(batches[batch_size*idx:batch_size*(idx+1)])
     else:
         batch_size = math.ceil(len(batches) / num_gpus)
-        expanded_batches = batches.clone()
+        expanded_batches = batches.copy() if type(batches) == list else batches.clone()
         while True:
-            expanded_batches = torch.cat([expanded_batches, batches.clone()], dim=0)
+            expanded_batches = expanded_batches + batches.copy() if type(batches) == list else torch.cat([expanded_batches, batches.clone()], dim=0)
             if len(expanded_batches) >= batch_size*num_gpus:
                 expanded_batches = expanded_batches[:batch_size*num_gpus]
                 break
         for idx in range(num_gpus):
             distributed_data.append(expanded_batches[batch_size*idx:batch_size*(idx+1)])
+
     return distributed_data
 
 def train(model, reader, optimizer, writer, hparams, tokenizer):
@@ -57,7 +58,7 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
 
     for batch_idx, batch in t:
         inputs, contexts, spans = reader.make_input(batch)
-        batch_size = contexts[0].size(0)
+        batch_size = len(contexts[0])
 
         turns = len(inputs)
         total_loss = 0
@@ -74,21 +75,23 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                 distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
                 
                 # split batches for gpu memory
-                context_len = contexts[turn_idx].size(1)
-                if context_len >= 350:
-                    small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 8), distributed_batch_size)
-                elif context_len >= 200:
-                    small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 4), distributed_batch_size)
-                elif context_len >= 100:
+                context_len = 0
+                for idx in range(distributed_batch_size):
+                    context_len_ = len(contexts[turn_idx][idx])
+                    if context_len < context_len_:
+                        context_len = context_len_
+                if context_len >= 40:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
                 else:
                     small_batch_size = distributed_batch_size
-                    
+
                 # distribute batches to each gpu
                 for key, value in inputs[turn_idx].items():
                     inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
                 contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
                 spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
+
+                first_turn = (turn_idx == 0)
 
                 for small_batch_idx in range(math.ceil(distributed_batch_size/small_batch_size)):
                     small_inputs = {}
@@ -96,9 +99,9 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                         small_inputs[key] = value[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
                     small_contexts = contexts[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
                     small_spans = spans[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                    
+
                     optimizer.zero_grad()
-                    loss, acc = model.forward(small_inputs, small_contexts, small_spans)  # loss: [batch], acc: [batch, slot]
+                    loss, acc = model.forward(small_inputs, small_contexts, small_spans, first_turn)  # loss: [batch], acc: [batch, slot]
 
                     total_loss += loss.sum(dim=0).item()
                     slot_acc += acc.sum(dim=1).sum(dim=0).item()
@@ -142,7 +145,7 @@ def validate(model, reader, hparams, tokenizer):
 
         for batch_idx, batch in t:
             inputs, contexts, spans = reader.make_input(batch)
-            batch_size = contexts[0].size(0)
+            batch_size = len(contexts[0])
 
             turns = len(inputs)
 
@@ -154,7 +157,9 @@ def validate(model, reader, hparams, tokenizer):
                 contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
                 spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
                 
-                loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], train=False)
+                first_turn = (turn_idx == 0)
+
+                loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], first_turn, train=False)
             
                 val_loss += loss.sum(dim=0).item()
                 slot_acc += acc.sum(dim=1).sum(dim=0).item()
@@ -240,12 +245,14 @@ if __name__ == "__main__":
         torch.distributed.barrier()
 
     train.max_iter = len(list(reader.make_batch(reader.train)))
-    validate.max_iter = len(list(reader.make_batch(reader.dev)))
+    validate.max_iter = int(len(list(reader.make_batch(reader.dev))) / 4)
     train.warmup_steps = train.max_iter * hparams.max_epochs * hparams.warmup_steps
     
     train.global_step = 0
     max_joint_acc = 0
     early_stop_count = hparams.early_stop_count
+
+    loss, joint_acc, slot_acc = validate(model, reader, hparams, tokenizer)
 
     for epoch in range(hparams.max_epochs):
         logger.info("Train...")
