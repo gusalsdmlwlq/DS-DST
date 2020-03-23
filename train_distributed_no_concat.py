@@ -83,7 +83,7 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
                 else:
                     small_batch_size = distributed_batch_size
-
+                    
                 # distribute batches to each gpu
                 for key, value in inputs[turn_idx].items():
                     inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
