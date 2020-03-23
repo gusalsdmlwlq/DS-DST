@@ -125,6 +125,7 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                 print("\n!!! Error: {}".format(e))
                 print("batch size: {}, context length: {}".format(small_batch_size, context_len))
             torch.cuda.empty_cache()
+            exit(0)
 
 def validate(model, reader, hparams, tokenizer):
     model.eval()
