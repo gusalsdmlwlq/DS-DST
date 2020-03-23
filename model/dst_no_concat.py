@@ -94,7 +94,6 @@ class DST(nn.Module):
         batch_size = turn_context.size(0)
         loss = []
         acc = []
-        print(batch_size)
         context = turn_context  # context: [batch, context_len]
         context_mask = (context != 0)
 

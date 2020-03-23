@@ -8,7 +8,7 @@ class Config:
     parser.add_argument("--batch_size", default=128, type=int)
     parser.add_argument("--max_len", default=100, type=int)
     parser.add_argument("--max_value_len", default=20, type=int)
-    parser.add_argument("--max_context_len", default=510, type=int)
+    parser.add_argument("--max_context_len", default=450, type=int)
     parser.add_argument("--no_cuda", action="store_true", default=False)
     parser.add_argument("--margin", default=0.5, type=float)
     parser.add_argument("--lr", default=1e-4, type=float)

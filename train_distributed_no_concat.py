@@ -69,64 +69,67 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
         for param in optimizer.param_groups:
             param["lr"] = learning_rate_schedule(train.global_step, train.max_iter, hparams)
 
-        for turn_idx in range(turns):
-            # concat [CLS] & [SEP] to context
-            bos = torch.tensor([tokenizer.cls_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # bos: [batch, 1]
-            eos = torch.tensor([tokenizer.sep_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # eos: [batch, 1]
-            contexts[turn_idx] = torch.cat([bos, contexts[turn_idx], eos], dim=1)
+        try:
+            for turn_idx in range(turns):
+                # concat [CLS] & [SEP] to context
+                bos = torch.tensor([tokenizer.cls_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # bos: [batch, 1]
+                eos = torch.tensor([tokenizer.sep_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # eos: [batch, 1]
+                contexts[turn_idx] = torch.cat([bos, contexts[turn_idx], eos], dim=1)
 
-            distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
-            
-            # split batches for gpu memory
-            context_len = contexts[turn_idx].size(1)
-            if context_len >= 410:
-                small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 8), distributed_batch_size)
-            if context_len >= 260:
-                small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 4), distributed_batch_size)
-            elif context_len >= 160:
-                small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
-            else:
-                small_batch_size = distributed_batch_size
+                distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
+                
+                # split batches for gpu memory
+                context_len = contexts[turn_idx].size(1)
+                if context_len >= 410:
+                    small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 8), distributed_batch_size)
+                elif context_len >= 260:
+                    small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 4), distributed_batch_size)
+                elif context_len >= 160:
+                    small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
+                else:
+                    small_batch_size = distributed_batch_size
 
-            # distribute batches to each gpu
-            for key, value in inputs[turn_idx].items():
-                inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
-            contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
-            spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
-
-            for small_batch_idx in range(math.ceil(distributed_batch_size/small_batch_size)):
-                small_inputs = {}
+                # distribute batches to each gpu
                 for key, value in inputs[turn_idx].items():
-                    small_inputs[key] = value[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                small_contexts = contexts[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
-                small_spans = spans[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
+                    inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
+                contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
+                spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
+
+                for small_batch_idx in range(math.ceil(distributed_batch_size/small_batch_size)):
+                    small_inputs = {}
+                    for key, value in inputs[turn_idx].items():
+                        small_inputs[key] = value[small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
+                    small_contexts = contexts[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
+                    small_spans = spans[turn_idx][small_batch_size*small_batch_idx:small_batch_size*(small_batch_idx+1)]
+                    
+                    optimizer.zero_grad()
+                    loss, acc = model.forward(small_inputs, small_contexts, small_spans)  # loss: [batch], acc: [batch, slot]
+
+                    total_loss += loss.sum(dim=0).item()
+                    slot_acc += acc.sum(dim=1).sum(dim=0).item()
+                    joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
+                    batch_count += small_batch_size
+                    loss = loss.mean(dim=0)
+
+                    # distributed training
+                    with amp.scale_loss(loss, optimizer) as scaled_loss:
+                        scaled_loss.backward()
+
+                    optimizer.step()
+                    torch.cuda.empty_cache()
                 
-                optimizer.zero_grad()
-
-                loss, acc = model.forward(small_inputs, small_contexts, small_spans)  # loss: [batch], acc: [batch, slot]
-
-                total_loss += loss.sum(dim=0).item()
-                slot_acc += acc.sum(dim=1).sum(dim=0).item()
-                joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
-                
-                batch_count += small_batch_size
-                
-                loss = loss.mean(dim=0)
-
-                # distributed training
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-
-                optimizer.step()
+            total_loss = total_loss / batch_count
+            slot_acc = slot_acc / batch_count / len(ontology.all_info_slots) * 100
+            joint_acc = joint_acc / batch_count * 100
+            train.global_step += 1
+            if hparams.local_rank == 0:
+                writer.add_scalar("Train/loss", total_loss, train.global_step)
+                t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
+        except RuntimeError as e:
+            if hparams.local_rank == 0:
+                print("\n!!! Error: {}".format(e))
+                print("batch size: {}, context length: {}".format(small_batch_size, context_len))
                 torch.cuda.empty_cache()
-            
-        total_loss = total_loss / batch_count
-        slot_acc = slot_acc / batch_count / len(ontology.all_info_slots) * 100
-        joint_acc = joint_acc / batch_count * 100
-        train.global_step += 1
-        if hparams.local_rank == 0:
-            writer.add_scalar("Train/loss", total_loss, train.global_step)
-            t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
 
 def validate(model, reader, hparams, tokenizer):
     # model.eval()
@@ -174,7 +177,8 @@ def validate(model, reader, hparams, tokenizer):
                 t.set_description("iter: {}".format(batch_idx+1))
 
     model.train()
-    model.value_encoder.eval()  # fix value encoder
+    model.module.slot_encoder.eval()
+    model.module.value_encoder.eval()  # fix value encoder
     val_loss = val_loss / batch_count
     slot_acc = slot_acc / batch_count / len(ontology.all_info_slots) * 100
     joint_acc = joint_acc / batch_count * 100
@@ -273,8 +277,8 @@ if __name__ == "__main__":
         if joint_acc > max_joint_acc:  # save model
             if hparams.local_rank == 0:
                 save(model, optimizer, save_path)
+                logger.info("Saved to {}.".format(os.path.abspath(save_path)))
             torch.distributed.barrier()  # synchronize
-            logger.info("Saved to {}.".format(os.path.abspath(save_path)))
             max_joint_acc = joint_acc
             early_stop_count = hparams.early_stop_count
         else:  # ealry stopping
