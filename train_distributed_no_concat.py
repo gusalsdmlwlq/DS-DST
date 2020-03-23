@@ -127,7 +127,7 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                 torch.cuda.empty_cache()
 
 def validate(model, reader, hparams, tokenizer):
-    # model.eval()
+    model.eval()
     val_loss = 0
     slot_acc = 0
     joint_acc = 0

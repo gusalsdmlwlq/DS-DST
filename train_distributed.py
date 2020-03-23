@@ -126,7 +126,7 @@ def train(model, reader, optimizer, writer, hparams):
             t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
 
 def validate(model, reader, hparams):
-    # model.eval()
+    model.eval()
     val_loss = 0
     loss_count = 0
     slot_acc = 0

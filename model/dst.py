@@ -114,22 +114,7 @@ class DST(nn.Module):
         value_mask = (value_label != 0)
         true_value_output, _ = self.value_encoder(value_label, attention_mask=value_mask)  # true_value_output: [batch, value_len, hidden]
         true_value_probs = torch.cosine_similarity(outputs[:, 0, :], true_value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # true_value_prob: [batch, 1]
-        
-        # find max cosine similarity with context except true value
-        true_value_mask = (value_probs == true_value_probs)
-        value_probs.masked_fill_(true_value_mask, -1.0)
-        max_value_probs = value_probs.max(dim=1, keepdim=True)[0]  # max_value_probs: [batch, 1]
-        loss_value = torch.max(torch.cat([torch.zeros_like(true_value_probs), self.margin - true_value_probs + max_value_probs], dim=1),dim=1)[0]  # loss_value: [batch]
 
-        # loss: [batch]
-        if self.use_span:
-            loss = loss_gate + loss_span + loss_value
-        else:
-            loss = loss_gate + loss_value
-
-        # if train:
-        #     return loss
-        # else:
         acc = torch.ones(batch_size).cuda()  # acc: [batch]
         
         mask = (gate_label != gate_output.argmax(dim=1))
@@ -143,6 +128,18 @@ class DST(nn.Module):
         mask = ((value_label == pred_value).sum(dim=1)/value_label.size(1) != 1)
         mask.masked_fill_((gate_label != ontology.gate_dict["prediction"]), False)  # if gate is none or don't care, ignore value in accuracy
         acc.masked_fill_(mask, 0)  # fail to predict value
+
+        # find max cosine similarity with context except true value
+        true_value_mask = (value_probs == true_value_probs)
+        value_probs.masked_fill_(true_value_mask, -1.0)
+        max_value_probs = value_probs.max(dim=1, keepdim=True)[0]  # max_value_probs: [batch, 1]
+        loss_value = torch.max(torch.cat([torch.zeros_like(true_value_probs), self.margin - true_value_probs + max_value_probs], dim=1),dim=1)[0]  # loss_value: [batch]
+
+        # loss: [batch]
+        if self.use_span:
+            loss = loss_gate + loss_span + loss_value
+        else:
+            loss = loss_gate + loss_value
 
         return loss, acc
 
