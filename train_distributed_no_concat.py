@@ -41,7 +41,7 @@ def distribute_data(batches, num_gpus):
         while True:
             expanded_batches = torch.cat([expanded_batches, batches.clone()], dim=0)
             if len(expanded_batches) >= batch_size*num_gpus:
-                expanded_batches = expanded_batches[:batch_size*num_gpus]
+                expanded_batches = expanded_batches[:batch_size*num_gpus:]
                 break
         for idx in range(num_gpus):
             distributed_data.append(expanded_batches[batch_size*idx:batch_size*(idx+1)])
