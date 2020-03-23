@@ -294,7 +294,7 @@ class Reader:
                         turn_context[idx] += resp
                 prev_resp = []
                 for idx, user in enumerate(batch[turn]["user"]):
-                    turn_context[idx] = user[1:-1]
+                    turn_context[idx] += user[1:-1]
                     if context_len < len(turn_context[idx]):
                         context_len = len(turn_context[idx])
                     if len(turn_context[idx]) > self.max_context_len:  # cut long contexts for BERT's input
