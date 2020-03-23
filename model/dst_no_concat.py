@@ -17,10 +17,10 @@ class SelfAttention(nn.Module):
     def __init__(self, hidden_size, dropout):
         super(SelfAttention, self).__init__()
         self.hidden_size = hidden_size
-        self.dropout = nn.Dropout(dropout)
         self.query = nn.Linear(hidden_size, hidden_size)
         self.key = nn.Linear(hidden_size, hidden_size)
         self.value = nn.Linear(hidden_size, hidden_size)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, inputs, pad_mask=None):
         # inputs: [batch, context_len, hidden] including [CLS], [SEP]
@@ -31,7 +31,7 @@ class SelfAttention(nn.Module):
         attenion_score = torch.matmul(query, key.transpose(1,2)) / np.sqrt(self.hidden_size)
         
         if pad_mask is not None:
-            pad_mask = pad_mask.unsqueeze(dim=1)
+            pad_mask = ~pad_mask.unsqueeze(dim=1)
             attenion_score.masked_fill_(pad_mask, value=-float("inf"))
         
         attenion_score = F.softmax(attenion_score, dim=2)
@@ -95,7 +95,7 @@ class DST(nn.Module):
         loss = []
         acc = []
         context = turn_context  # context: [batch, context_len]
-        context_mask = (context != 0)
+        context_mask = (context != 0)  # True if [PAD]
 
         context_outputs, _ = self.context_encoder(context, attention_mask=context_mask)  # output: [batch, context_len, hidden]
 
