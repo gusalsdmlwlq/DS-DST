@@ -23,4 +23,4 @@ class Config:
 
     # for distributed training
     parser.add_argument("--local_rank", default=0, type=int)
-    parser.add_argument("--num_gpus", default=2, type=int)
+    parser.add_argument("--num_gpus", default=1, type=int)

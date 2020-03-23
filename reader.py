@@ -274,13 +274,13 @@ class Reader:
             if turn == 0:  # first turn
                 turn_context_ = torch.zeros((batch_size, self.max_context_len))
                 for idx, user in enumerate(batch[turn]["user"]):
-                    turn_context.append(user[1:-1])  # remove [CLS] & [SEP]
-                    if context_len < len(user[1:-1]):
-                        context_len = len(user[1:-1])
-                    turn_context_[idx, :len(turn_context[idx])] = torch.tensor(turn_context[idx])
+                    turn_context.append(user[1:-1])
+                    if context_len < len(turn_context[idx]):
+                        context_len = len(turn_context[idx])
+                    turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
                 for resp in batch[turn]["response"]:
                     prev_resp.append(resp[1:-1])
-                turn_context_ = turn_context_[:, :context_len]
+                turn_context_ = turn_context_[:, :context_len+2]
                 
                 turn_context_ = turn_context_.cuda()
                 
@@ -294,15 +294,15 @@ class Reader:
                         turn_context[idx] += resp
                 prev_resp = []
                 for idx, user in enumerate(batch[turn]["user"]):
-                    turn_context[idx] += user[1:-1]
+                    turn_context[idx] = user[1:-1]
                     if context_len < len(turn_context[idx]):
                         context_len = len(turn_context[idx])
                     if len(turn_context[idx]) > self.max_context_len:  # cut long contexts for BERT's input
                         turn_context[idx] = turn_context[idx][-self.max_context_len:]
-                    turn_context_[idx, :len(turn_context[idx])] = torch.tensor(turn_context[idx])
+                    turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
                 for resp in batch[turn]["response"]:
                     prev_resp.append(resp[1:-1])
-                turn_context_ = turn_context_[:, :min(context_len, self.max_context_len)]
+                turn_context_ = turn_context_[:, :min(context_len, self.max_context_len)+2]
 
                 turn_context_ = turn_context_.cuda()
 
@@ -314,6 +314,7 @@ class Reader:
                 for idx, gate_ in enumerate(gate):
                     if gate_ == ontology.gate_dict["prediction"]:
                         turn_spans[bidx][idx] = torch.tensor(self.find_span(turn_context[bidx], batch[turn]["belief"][bidx][idx]))
+                        turn_spans[bidx][idx] += 1  # for [CLS]
             
             turn_spans = turn_spans.cuda()
             

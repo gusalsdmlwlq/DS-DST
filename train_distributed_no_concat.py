@@ -71,20 +71,15 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
 
         try:
             for turn_idx in range(turns):
-                # concat [CLS] & [SEP] to context
-                bos = torch.tensor([tokenizer.cls_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # bos: [batch, 1]
-                eos = torch.tensor([tokenizer.sep_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # eos: [batch, 1]
-                contexts[turn_idx] = torch.cat([bos, contexts[turn_idx], eos], dim=1)
-
                 distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
                 
                 # split batches for gpu memory
                 context_len = contexts[turn_idx].size(1)
-                if context_len >= 410:
+                if context_len >= 350:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 8), distributed_batch_size)
-                elif context_len >= 260:
+                elif context_len >= 200:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 4), distributed_batch_size)
-                elif context_len >= 160:
+                elif context_len >= 100:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
                 else:
                     small_batch_size = distributed_batch_size
@@ -152,10 +147,6 @@ def validate(model, reader, hparams, tokenizer):
             turns = len(inputs)
 
             for turn_idx in range(turns):
-                bos = torch.tensor([tokenizer.cls_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # bos: [batch, 1]
-                eos = torch.tensor([tokenizer.sep_token_id], dtype=torch.int64).repeat(batch_size).unsqueeze(dim=1).cuda()  # eos: [batch, 1]
-                contexts[turn_idx] = torch.cat([bos, contexts[turn_idx], eos], dim=1)
-
                 distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
 
                 for key, value in inputs[turn_idx].items():
@@ -241,7 +232,7 @@ if __name__ == "__main__":
     model = DST(hparams).cuda()
     optimizer = Adam(model.parameters(), hparams.lr)
     model, optimizer = amp.initialize(model, optimizer, opt_level="O1", verbosity=0)
-    model = parallel.DistributedDataParallel(model)
+    # model = parallel.DistributedDataParallel(model)
 
     # load saved model, optimizer
     if hparams.save_path is not None:
