@@ -280,7 +280,7 @@ class Reader:
                     turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
                 for resp in batch[turn]["response"]:
                     prev_resp.append(resp[1:-1])
-                turn_context_ = turn_context_[:, :context_len]
+                turn_context_ = turn_context_[:, :context_len+2]
                 
                 turn_context_ = turn_context_.cuda()
                 
@@ -302,7 +302,7 @@ class Reader:
                     turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
                 for resp in batch[turn]["response"]:
                     prev_resp.append(resp[1:-1])
-                turn_context_ = turn_context_[:, :min(context_len, self.max_context_len)]
+                turn_context_ = turn_context_[:, :min(context_len, self.max_context_len)+2]
 
                 turn_context_ = turn_context_.cuda()
 
@@ -315,7 +315,7 @@ class Reader:
                     if gate_ == ontology.gate_dict["prediction"]:
                         turn_spans[bidx][idx] = torch.tensor(self.find_span(turn_context[bidx], batch[turn]["belief"][bidx][idx]))
                         turn_spans[bidx][idx] += 1  # for [CLS]
-
+                        
             turn_spans = turn_spans.cuda()
             
             spans.append(turn_spans)
