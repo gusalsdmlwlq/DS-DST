@@ -160,7 +160,7 @@ def validate(model, reader, hparams, tokenizer):
                 slot_acc += acc.sum(dim=1).sum(dim=0).item()
                 joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
 
-                batch_count += batch_size
+                batch_count += distributed_batch_size
 
                 torch.cuda.empty_cache()
 

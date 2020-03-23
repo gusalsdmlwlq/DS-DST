@@ -270,8 +270,9 @@ class Reader:
             turn_input["action"] = act_[:, :max_len].clone().long()
             
             for key, value in turn_input.items():
-                if self.no_history and key != "belief":
-                    turn_input[key] = value.cuda()
+                if self.no_history:
+                    if key != "belief":
+                        turn_input[key] = value.cuda()
                 else:
                     turn_input[key] = value.cuda()
 

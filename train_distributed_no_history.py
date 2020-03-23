@@ -71,6 +71,7 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
             param["lr"] = learning_rate_schedule(train.global_step, train.max_iter, hparams)
 
         try:
+            prev_belief = None  # belief for next turn
             for turn_idx in range(turns):
                 distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
                 
@@ -93,6 +94,11 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
 
                 first_turn = (turn_idx == 0)
 
+                if not first_turn:
+                    inputs[turn_idx]["belief_gen"] = prev_belief
+
+                prev_belief = []
+
                 for small_batch_idx in range(math.ceil(distributed_batch_size/small_batch_size)):
                     small_inputs = {}
                     for key, value in inputs[turn_idx].items():
@@ -102,6 +108,8 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
 
                     optimizer.zero_grad()
                     loss, acc = model.forward(small_inputs, small_contexts, small_spans, first_turn)  # loss: [batch], acc: [batch, slot]
+                    
+                    prev_belief.append(small_inputs["belief_gen"])
 
                     total_loss += loss.sum(dim=0).item()
                     slot_acc += acc.sum(dim=1).sum(dim=0).item()
@@ -115,7 +123,12 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
 
                     optimizer.step()
                     torch.cuda.empty_cache()
-                
+
+                prev_belief_ = []
+                for belief in prev_belief:
+                    prev_belief_ += belief
+                prev_belief = prev_belief_ 
+
             total_loss = total_loss / batch_count
             slot_acc = slot_acc / batch_count / len(ontology.all_info_slots) * 100
             joint_acc = joint_acc / batch_count * 100
@@ -128,6 +141,7 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                 print("\n!!! Error: {}".format(e))
                 print("batch size: {}, context length: {}".format(small_batch_size, context_len))
             torch.cuda.empty_cache()
+            exit(0)
 
 def validate(model, reader, hparams, tokenizer):
     model.eval()
@@ -149,6 +163,7 @@ def validate(model, reader, hparams, tokenizer):
 
             turns = len(inputs)
 
+            prev_belief = None
             for turn_idx in range(turns):
                 distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
 
@@ -158,14 +173,19 @@ def validate(model, reader, hparams, tokenizer):
                 spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
                 
                 first_turn = (turn_idx == 0)
+                if not first_turn:
+                    inputs[turn_idx]["belief_gen"] = prev_belief
 
                 loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], first_turn, train=False)
             
+                if turn_idx+1 < turns:
+                    prev_belief = inputs[turn_idx]["belief_gen"]
+
                 val_loss += loss.sum(dim=0).item()
                 slot_acc += acc.sum(dim=1).sum(dim=0).item()
                 joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
 
-                batch_count += batch_size
+                batch_count += distributed_batch_size
 
                 torch.cuda.empty_cache()
 
@@ -245,14 +265,12 @@ if __name__ == "__main__":
         torch.distributed.barrier()
 
     train.max_iter = len(list(reader.make_batch(reader.train)))
-    validate.max_iter = int(len(list(reader.make_batch(reader.dev))) / 4)
+    validate.max_iter = len(list(reader.make_batch(reader.dev)))
     train.warmup_steps = train.max_iter * hparams.max_epochs * hparams.warmup_steps
     
     train.global_step = 0
     max_joint_acc = 0
     early_stop_count = hparams.early_stop_count
-
-    loss, joint_acc, slot_acc = validate(model, reader, hparams, tokenizer)
 
     for epoch in range(hparams.max_epochs):
         logger.info("Train...")

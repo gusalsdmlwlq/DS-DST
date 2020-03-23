@@ -66,6 +66,7 @@ class DST(nn.Module):
         batch_size = len(turn_context)
         loss = []
         acc = []
+        belief_gen = [[]] * batch_size  # belief_gen: [batch, slots, value_len]
 
         for slot_idx in range(len(ontology.all_info_slots)):
             slot_ = ontology.all_info_slots[slot_idx]
@@ -76,7 +77,7 @@ class DST(nn.Module):
             value_max_len = 0
 
             # use previous belief
-            teacher_forcing = 1
+            teacher_forcing = 1 if train else 0
 
             context = torch.zeros((batch_size, self.max_context_len), dtype=torch.int64).cuda()  # context: [batch, context_len]
             max_len = 0
@@ -99,7 +100,6 @@ class DST(nn.Module):
                     max_len = len(temp)
             
             context = context[:, :max_len]
-            context = torch.randint(low=0, high=30000, size=(batch_size, 80), dtype=torch.int64).cuda()
             context_mask = (context != 0)
 
             outputs, _ = self.context_encoder(context, attention_mask=context_mask)  # output: [batch, context_len, hidden]
@@ -153,7 +153,9 @@ class DST(nn.Module):
             pred_value = torch.zeros_like(value_label).cuda()  # pred_value: [batch, value_len]
             value_probs_ = value_probs.argmax(dim=1)  # value_probs: [batch]
             for batch_idx in range(batch_size):
-                pred = torch.tensor(self.tokenizer.encode(value_list[value_probs_[batch_idx]])).cuda()  # pred: [value_len]
+                pred = self.tokenizer.encode(value_list[value_probs_[batch_idx]])
+                belief_gen[batch_idx].append(pred)
+                pred = torch.tensor(pred).cuda()  # pred: [value_len]
                 pred_value[batch_idx:, :len(pred)] = pred[:min(len(pred), value_label.size(1))]
             mask = ((value_label == pred_value).sum(dim=1)/value_label.size(1) != 1)
             mask.masked_fill_((gate_label != ontology.gate_dict["prediction"]), False)  # if gate is none or don't care, ignore value in accuracy
@@ -162,7 +164,13 @@ class DST(nn.Module):
             acc.append(acc_slot)
 
             # find max cosine similarity with context except true value
-            true_value_mask = (value_probs == true_value_probs)
+            true_value_mask = torch.zeros((batch_size, len(value_list)), dtype=torch.bool).cuda()  # true_value_mask: [batch, value_nums]
+            for idx in range(batch_size):
+                for v_idx, v in enumerate(value_list):
+                    v = self.tokenizer.encode(v)
+                    if v == value_label[idx][:len(v)]:
+                        true_value_mask[idx, v_idx] = True
+                        break
             value_probs.masked_fill_(true_value_mask, value=-1.0)
             max_value_probs = value_probs.max(dim=1, keepdim=True)[0]  # max_value_probs: [batch, 1]
             loss_value = torch.max(torch.cat([torch.zeros_like(true_value_probs), self.margin - true_value_probs + max_value_probs], dim=1),dim=1)[0]  # loss_value: [batch]
@@ -177,6 +185,7 @@ class DST(nn.Module):
 
         loss = torch.stack(loss, dim=1).sum(dim=1)  # loss: [batch]
         acc = torch.stack(acc, dim=1)  # acc: [batch, slot]
+        turn_input["belief_gen"] = belief_gen
 
         return loss, acc
 
