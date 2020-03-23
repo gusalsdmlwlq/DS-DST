@@ -315,6 +315,7 @@ class Reader:
                     if gate_ == ontology.gate_dict["prediction"]:
                         turn_spans[bidx][idx] = torch.tensor(self.find_span(turn_context[bidx], batch[turn]["belief"][bidx][idx]))
                         turn_spans[bidx][idx] += 1  # for [CLS]
+                        
             turn_spans = turn_spans.cuda()
             
             spans.append(turn_spans)
