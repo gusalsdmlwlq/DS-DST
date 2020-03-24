@@ -164,7 +164,7 @@ class DST(nn.Module):
                 pred = self.tokenizer.encode(value_list[value_probs_[batch_idx]])  # pred: [value_len]
                 # fail to predict value
                 if gate_label[batch_idx] == ontology.gate_dict["prediction"] and value_label[batch_idx, :len(pred)].tolist() != pred:
-                    acc[batch_idx] = 0
+                    acc_slot[batch_idx] = 0
 
             acc.append(acc_slot)
 
