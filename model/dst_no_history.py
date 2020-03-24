@@ -5,7 +5,7 @@ import json
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import BertModel, BertTokenizerFast
+from transformers import DistilBertModel, DistilBertTokenizerFast
 import numpy as np
 
 sys.path.append("../")
@@ -34,10 +34,10 @@ class DST(nn.Module):
         """
         
         super(DST, self).__init__()
-        self.context_encoder = BertModel.from_pretrained("bert-base-uncased")  # use fine-tuning
+        self.context_encoder = DistilBertModel.from_pretrained("distilbert-base-uncased")  # use fine-tuning
         self.context_encoder.train()
-        self.value_encoder = BertModel.from_pretrained("bert-base-uncased").requires_grad_(False)  # fix parameter
-        self.tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+        self.value_encoder = DistilBertModel.from_pretrained("distilbert-base-uncased").requires_grad_(False)  # fix parameter
+        self.tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
         self.hidden_size = self.context_encoder.embeddings.word_embeddings.embedding_dim  # 768
         self.linear_gate = nn.Linear(self.hidden_size, 3)  # none, don't care, prediction
         self.linear_span = nn.Linear(self.hidden_size, 2)  # start, end
@@ -98,11 +98,11 @@ class DST(nn.Module):
                 context[idx, :len(temp)] = torch.tensor(temp, dtype=torch.int64).cuda()
                 if max_len < len(temp):
                     max_len = len(temp)
-            
+    
             context = context[:, :max_len]
             context_mask = (context != 0)
 
-            outputs, _ = self.context_encoder(context, attention_mask=context_mask)  # output: [batch, context_len, hidden]
+            outputs = self.context_encoder(context, attention_mask=context_mask)[0]  # output: [batch, context_len, hidden]
             gate_output = self.linear_gate(outputs[:, 0, :])  # gate_output: [batch, 3]
             gate_output = F.log_softmax(gate_output, dim=1)
 
@@ -133,7 +133,7 @@ class DST(nn.Module):
             value_list = self.value_ontology[slot_] + ["none"]
             for value in value_list:
                 value_output = torch.tensor([self.tokenizer.encode(value)]).cuda()
-                value_output, _ = self.value_encoder(value_output)  # value_outputs: [1, value_len, hidden]
+                value_output = self.value_encoder(value_output)[0]  # value_outputs: [1, value_len, hidden]
                 value_prob = torch.cosine_similarity(outputs[:, 0, :], value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # value_prob: [batch, 1]
                 if value_probs is None:
                     value_probs = value_prob
@@ -142,7 +142,7 @@ class DST(nn.Module):
 
             # cosine similarity of true value with context
             value_mask = (value_label != 0)
-            true_value_output, _ = self.value_encoder(value_label, attention_mask=value_mask)  # true_value_output: [batch, value_len, hidden]
+            true_value_output = self.value_encoder(value_label, attention_mask=value_mask)[0]  # true_value_output: [batch, value_len, hidden]
             true_value_probs = torch.cosine_similarity(outputs[:, 0, :], true_value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # true_value_prob: [batch, 1]
 
             acc_slot = torch.ones(batch_size).cuda()  # acc: [batch]
