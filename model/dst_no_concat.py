@@ -161,11 +161,10 @@ class DST(nn.Module):
             pred_value = torch.zeros_like(value_label).cuda()  # pred_value: [batch, value_len]
             value_probs_ = value_probs.argmax(dim=1)  # value_probs: [batch]
             for batch_idx in range(batch_size):
-                pred = torch.tensor(self.tokenizer.encode(value_list[value_probs_[batch_idx]])).cuda()  # pred: [value_len]
-                pred_value[batch_idx:, :len(pred)] = pred[:min(len(pred), value_label.size(1))]
-            mask = ((value_label == pred_value).sum(dim=1)/value_label.size(1) != 1)
-            mask.masked_fill_((gate_label != ontology.gate_dict["prediction"]), False)  # if gate is none or don't care, ignore value in accuracy
-            acc_slot.masked_fill_(mask, 0)  # fail to predict value
+                pred = self.tokenizer.encode(value_list[value_probs_[batch_idx]])  # pred: [value_len]
+                # fail to predict value
+                if gate_label[batch_idx] == ontology.gate_dict["prediction"] and value_label[batch_idx, :len(pred)].tolist() != pred:
+                    acc[batch_idx] = 0
 
             acc.append(acc_slot)
 
