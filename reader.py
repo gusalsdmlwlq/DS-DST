@@ -4,7 +4,7 @@ import logging
 import random
 
 import torch
-from transformers import BertTokenizerFast
+from transformers import DistilBertTokenizerFast
 
 import ontology
 
@@ -16,7 +16,7 @@ class Reader:
         self.test = {}
         self.data_turns = {}
         self.data_path = hparams.data_path
-        self.tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+        self.tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
         self.batch_size = hparams.batch_size
         self.max_len = hparams.max_len
         self.max_value_len = hparams.max_value_len
@@ -300,9 +300,7 @@ class Reader:
                         turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
                     for resp in batch[turn]["response"]:
                         prev_resp.append(resp[1:-1])
-                    turn_context_ = turn_context_[:, :context_len+2]
-                    
-                    turn_context_ = turn_context_.cuda()
+                    turn_context_ = turn_context_[:, :context_len+2].cuda()
                     
                     contexts.append(turn_context_.clone().long())
                 else:  # not first turn
@@ -319,9 +317,7 @@ class Reader:
                         turn_context_[idx, :len(turn_context[idx])+2] = torch.tensor([self.tokenizer.cls_token_id] + turn_context[idx] + [self.tokenizer.sep_token_id])
                     for resp in batch[turn]["response"]:
                         prev_resp.append(resp[1:-1])
-                    turn_context_ = turn_context_[:, :min(context_len, self.max_context_len)+2]
-
-                    turn_context_ = turn_context_.cuda()
+                    turn_context_ = turn_context_[:, :min(context_len, self.max_context_len)+2].cuda()
 
                     contexts.append(turn_context_.clone().long())
                 
