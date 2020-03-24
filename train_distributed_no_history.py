@@ -225,7 +225,8 @@ if __name__ == "__main__":
     model = DST(hparams).cuda()
     optimizer = Adam(model.parameters(), hparams.lr)
     model, optimizer = amp.initialize(model, optimizer, opt_level="O1", verbosity=0)
-    model = parallel.DistributedDataParallel(model)
+    if hparams.distributed:
+        model = parallel.DistributedDataParallel(model)
 
     # load saved model, optimizer
     if hparams.save_path is not None:
