@@ -75,7 +75,7 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                 
                 # split batches for gpu memory
                 context_len = contexts[turn_idx].size(1)
-                if context_len >= 350:
+                if context_len >= 330:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 8), distributed_batch_size)
                 elif context_len >= 200:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 4), distributed_batch_size)
@@ -122,9 +122,11 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                 t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
         except RuntimeError as e:
             if hparams.local_rank == 0:
-                print("\n!!! Error: {}".format(e))
+                print("\n!!!Error: {}".format(e))
                 print("batch size: {}, context length: {}".format(small_batch_size, context_len))
-            torch.cuda.empty_cache()
+                save_path = "save/model_{}_stopped.pt".format(re.sub("\s+", "_", time.asctime()))
+                save(model, optimizer, save_path)
+                print("Saved to {}, because stopped by RuntimeError.".format(os.path.abspath(save_path)))
             exit(0)
 
 def validate(model, reader, hparams, tokenizer):
