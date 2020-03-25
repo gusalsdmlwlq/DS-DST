@@ -12,7 +12,7 @@ from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 from apex import amp, parallel
 from tqdm import tqdm
-from transformers import BertTokenizerFast
+from transformers import DistilBertTokenizerFast
 
 from model.dst_no_concat import DST
 from config import Config
@@ -75,15 +75,15 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                 
                 # split batches for gpu memory
                 context_len = contexts[turn_idx].size(1)
-                if context_len >= 330:
+                if context_len >= 350:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 8), distributed_batch_size)
-                elif context_len >= 200:
+                elif context_len >= 220:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 4), distributed_batch_size)
-                elif context_len >= 100:
+                elif context_len >= 130:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
                 else:
                     small_batch_size = distributed_batch_size
-                    
+
                 # distribute batches to each gpu
                 for key, value in inputs[turn_idx].items():
                     inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
@@ -230,12 +230,13 @@ if __name__ == "__main__":
     end = time.time()
     logger.info("Loaded. {} secs".format(end-start))
 
-    tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+    tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
 
     model = DST(hparams).cuda()
     optimizer = Adam(model.parameters(), hparams.lr)
     model, optimizer = amp.initialize(model, optimizer, opt_level="O1", verbosity=0)
-    model = parallel.DistributedDataParallel(model)
+    if hparams.distributed:
+        model = parallel.DistributedDataParallel(model)
 
     # load saved model, optimizer
     if hparams.save_path is not None:
