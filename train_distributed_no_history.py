@@ -57,60 +57,73 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
         t = enumerate(iterator)
 
     for batch_idx, batch in t:
-        inputs, contexts, spans = reader.make_input(batch)
-        batch_size = len(contexts[0])
+        try:
+            inputs, contexts, spans = reader.make_input(batch)
+            batch_size = len(contexts[0])
 
-        turns = len(inputs)
-        total_loss = 0
-        slot_acc = 0
-        joint_acc = 0
-        batch_count = 0  # number of batches
+            turns = len(inputs)
+            total_loss = 0
+            slot_acc = 0
+            joint_acc = 0
+            batch_count = 0  # number of batches
 
-        # learning rate scheduling
-        for param in optimizer.param_groups:
-            param["lr"] = learning_rate_schedule(train.global_step, train.max_iter, hparams)
-            
-        prev_belief = None  # belief for next turn
-        for turn_idx in range(turns):
-            distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
-            
-            # distribute batches to each gpu
-            for key, value in inputs[turn_idx].items():
-                inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
-            contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
-            spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
+            # learning rate scheduling
+            for param in optimizer.param_groups:
+                param["lr"] = learning_rate_schedule(train.global_step, train.max_iter, hparams)
+                
+            prev_belief = None  # belief for next turn
+            for turn_idx in range(turns):
+                distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
+                
+                # distribute batches to each gpu
+                for key, value in inputs[turn_idx].items():
+                    inputs[turn_idx][key] = distribute_data(value, hparams.num_gpus)[hparams.local_rank]
+                contexts[turn_idx] = distribute_data(contexts[turn_idx], hparams.num_gpus)[hparams.local_rank]
+                spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
 
-            first_turn = (turn_idx == 0)
+                first_turn = (turn_idx == 0)
 
-            if not first_turn:
-                inputs[turn_idx]["belief_gen"] = prev_belief
+                if not first_turn:
+                    inputs[turn_idx]["belief_gen"] = prev_belief
 
-            optimizer.zero_grad()
-            loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], first_turn)  # loss: [batch], acc: [batch, slot]
-            
-            if turn_idx+1 < turns:
-                prev_belief = inputs[turn_idx]["belief_gen"]
+                optimizer.zero_grad()
+                loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], first_turn)  # loss: [batch], acc: [batch, slot]
+                
+                if turn_idx+1 < turns:
+                    prev_belief = inputs[turn_idx]["belief_gen"]
 
-            total_loss += loss.sum(dim=0).item()
-            slot_acc += acc.sum(dim=1).sum(dim=0).item()
-            joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
-            batch_count += distributed_batch_size
-            loss = loss.mean(dim=0)
+                total_loss += loss.sum(dim=0).item()
+                slot_acc += acc.sum(dim=1).sum(dim=0).item()
+                joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
+                batch_count += distributed_batch_size
+                loss = loss.mean(dim=0)
 
-            # distributed training
-            with amp.scale_loss(loss, optimizer) as scaled_loss:
-                scaled_loss.backward()
+                # distributed training
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
 
-            optimizer.step()
-            torch.cuda.empty_cache()
+                optimizer.step()
+                torch.cuda.empty_cache()
 
-        total_loss = total_loss / batch_count
-        slot_acc = slot_acc / batch_count / len(ontology.all_info_slots) * 100
-        joint_acc = joint_acc / batch_count * 100
-        train.global_step += 1
-        if hparams.local_rank == 0:
-            writer.add_scalar("Train/loss", total_loss, train.global_step)
-            t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
+            total_loss = total_loss / batch_count
+            slot_acc = slot_acc / batch_count / len(ontology.all_info_slots) * 100
+            joint_acc = joint_acc / batch_count * 100
+            train.global_step += 1
+            if hparams.local_rank == 0:
+                writer.add_scalar("Train/loss", total_loss, train.global_step)
+                t.set_description("iter: {}, loss: {:.4f}, joint accuracy: {:.4f}, slot accuracy: {:.4f}".format(batch_idx+1, total_loss, joint_acc, slot_acc))
+        except RuntimeError as e:
+            if hparams.local_rank == 0:
+                context_len = 0
+                for context in contexts[turn_idx]:
+                    context_len = max(context_len, len(context))
+                print("\n!!!Error: {}".format(e))
+                print("batch size: {}, context length: {}".format(batch_size, context_len))
+                save_path = "save/model_{}_stopped.pt".format(re.sub("\s+", "_", time.asctime()))
+                save(model, optimizer, save_path)
+                print("Saved to {}, because stopped by RuntimeError.".format(os.path.abspath(save_path)))
+            exit(0)
+
 
 def validate(model, reader, hparams, tokenizer):
     model.eval()
