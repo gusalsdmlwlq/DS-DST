@@ -97,7 +97,7 @@ class DST(nn.Module):
                 
                 if value_max_len < len(slot_value):
                     value_max_len = len(slot_value)
-                value_label[idx, :len(slot_value)] = torch.tensor(slot_value, dtype=torch.int64).cuda()
+                value_label[idx, :len(slot_value)] = torch.tensor(turn_input["belief"][idx][slot_idx], dtype=torch.int64).cuda()
 
                 temp = slot[:-1] + slot_value[1:] + turn_context[idx] + [self.tokenizer.sep_token_id]  # [CLS] domain slot value [SEP] context [SEP]
                 context[idx, :len(temp)] = torch.tensor(temp, dtype=torch.int64).cuda()
