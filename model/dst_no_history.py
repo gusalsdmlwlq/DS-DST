@@ -74,7 +74,6 @@ class DST(nn.Module):
             slot_len = len(slot)
 
             value_label = torch.zeros((batch_size, self.max_value_len), dtype=torch.int64).cuda()  # value_label: [batch, value_len]
-            value_max_len = 0
 
             # # use previous belief
             # if train:
@@ -95,9 +94,7 @@ class DST(nn.Module):
                     else:
                         slot_value = turn_input["belief_gen"][idx][slot_idx]
                 
-                if value_max_len < len(slot_value):
-                    value_max_len = len(slot_value)
-                value_label[idx, :len(slot_value)] = torch.tensor(turn_input["belief"][idx][slot_idx], dtype=torch.int64).cuda()
+                value_label[idx, :len(turn_input["belief"][idx][slot_idx] )] = torch.tensor(turn_input["belief"][idx][slot_idx], dtype=torch.int64).cuda()
 
                 temp = slot[:-1] + slot_value[1:] + turn_context[idx] + [self.tokenizer.sep_token_id]  # [CLS] domain slot value [SEP] context [SEP]
                 context[idx, :len(temp)] = torch.tensor(temp, dtype=torch.int64).cuda()
