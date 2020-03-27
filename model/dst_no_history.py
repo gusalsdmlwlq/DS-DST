@@ -75,26 +75,15 @@ class DST(nn.Module):
 
             value_label = torch.zeros((batch_size, self.max_value_len), dtype=torch.int64).cuda()  # value_label: [batch, value_len]
 
-            # # use previous belief
-            # if train:
-            #     teacher_forcing = 1 if np.random.rand() >= 0.5 else 0
-            # else:
-            #     teacher_forcing = 0
-
-            teacher_forcing = 0
-
             context = torch.zeros((batch_size, self.max_context_len), dtype=torch.int64).cuda()  # context: [batch, context_len]
             max_len = 0
             for idx in range(batch_size):
-                if teacher_forcing:
-                    slot_value = turn_input["belief"][idx][slot_idx]  # slot_value: [value_len]
+                if first_turn:
+                    slot_value = self.tokenizer.encode("none")  # first turn doesn't have previous belief
                 else:
-                    if first_turn:
-                        slot_value = self.tokenizer.encode("none")  # first turn doesn't have previous belief
-                    else:
-                        slot_value = turn_input["belief_gen"][idx][slot_idx]
+                    slot_value = turn_input["prev_belief"][idx][slot_idx]
                 
-                value_label[idx, :len(turn_input["belief"][idx][slot_idx] )] = torch.tensor(turn_input["belief"][idx][slot_idx], dtype=torch.int64).cuda()
+                value_label[idx, :len(turn_input["belief"][idx][slot_idx])] = torch.tensor(turn_input["belief"][idx][slot_idx], dtype=torch.int64).cuda()
 
                 temp = slot[:-1] + slot_value[1:] + turn_context[idx] + [self.tokenizer.sep_token_id]  # [CLS] domain slot value [SEP] context [SEP]
                 context[idx, :len(temp)] = torch.tensor(temp, dtype=torch.int64).cuda()
