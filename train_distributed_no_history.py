@@ -71,7 +71,6 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
             for param in optimizer.param_groups:
                 param["lr"] = learning_rate_schedule(train.global_step, train.max_iter, hparams)
                 
-            prev_belief = None  # belief for next turn
             for turn_idx in range(turns):
                 distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
                 
@@ -83,14 +82,16 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
 
                 first_turn = (turn_idx == 0)
 
+                teacher_forcing = 1 if np.random.rand() >= 0.5 else 0
+
                 if not first_turn:
-                    inputs[turn_idx]["belief_gen"] = prev_belief
+                    if teacher_forcing:  
+                        inputs[turn_idx]["prev_belief"] = inputs[turn_idx-1]["belief"]
+                    else:
+                        inputs[turn_idx]["prev_belief"] = inputs[turn_idx-1]["belief_gen"]
 
                 optimizer.zero_grad()
                 loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], first_turn)  # loss: [batch], acc: [batch, slot]
-                
-                if turn_idx+1 < turns:
-                    prev_belief = inputs[turn_idx]["belief_gen"]
 
                 total_loss += loss.sum(dim=0).item()
                 slot_acc += acc.sum(dim=1).sum(dim=0).item()
@@ -145,7 +146,6 @@ def validate(model, reader, hparams, tokenizer):
 
             turns = len(inputs)
 
-            prev_belief = None
             for turn_idx in range(turns):
                 distributed_batch_size = math.ceil(batch_size / hparams.num_gpus)
 
@@ -155,13 +155,11 @@ def validate(model, reader, hparams, tokenizer):
                 spans[turn_idx] = distribute_data(spans[turn_idx], hparams.num_gpus)[hparams.local_rank]
                 
                 first_turn = (turn_idx == 0)
+
                 if not first_turn:
-                    inputs[turn_idx]["belief_gen"] = prev_belief
+                    inputs[turn_idx]["prev_belief"] = inputs[turn_idx-1]["belief_gen"]
 
                 loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], first_turn, train=False)
-            
-                if turn_idx+1 < turns:
-                    prev_belief = inputs[turn_idx]["belief_gen"]
 
                 val_loss += loss.sum(dim=0).item()
                 slot_acc += acc.sum(dim=1).sum(dim=0).item()
