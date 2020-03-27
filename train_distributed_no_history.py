@@ -14,7 +14,7 @@ from apex import amp, parallel
 from tqdm import tqdm
 from transformers import DistilBertTokenizerFast
 
-from model.dst_no_history import DST
+from model.dst_no_history_crossentropy import DST
 from config import Config
 from reader import Reader
 import ontology
