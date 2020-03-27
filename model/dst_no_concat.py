@@ -69,14 +69,14 @@ class DST(nn.Module):
         self.value_encoder = DistilBertModel.from_pretrained("distilbert-base-uncased").requires_grad_(False)  # fix parameter
         self.tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
         self.hidden_size = self.context_encoder.embeddings.word_embeddings.embedding_dim  # 768
-        self.linear_gate = nn.Linear(self.hidden_size, 3)  # none, don't care, prediction
+        self.linear_gate = nn.Linear(self.hidden_size * 2, 3)  # none, don't care, prediction
         self.linear_span = nn.Linear(self.hidden_size, 2)  # start, end
         self.value_ontology = json.load(open(os.path.join(hparams.data_path, "ontology_processed.json"), "r"))
         self.gate_loss_weight = torch.tensor([0.5, 1.0, 1.0])
         self.gate_criterion = torch.nn.NLLLoss(weight=self.gate_loss_weight, reduction="none")
         # self.context_attention = SelfAttention(self.hidden_size, hparams.dropout)
-        self.context_attention = copy.deepcopy(self.context_encoder.transformer.layer[-1])
-        self.context_attention.train()
+        # self.context_attention = copy.deepcopy(self.context_encoder.transformer.layer[-1])
+        # self.context_attention.train()
 
         self.margin = hparams.margin
         self.use_span = hparams.use_span  # default False
@@ -109,10 +109,10 @@ class DST(nn.Module):
             slot = slot.expand((batch_size, slot_len)).cuda()  # slot: [batch, slot_len]
             slot_outputs = self.slot_encoder(slot)[0]  # slot_outputs: [batch, slot_len, hidden]
             
-            outputs = torch.cat([slot_outputs[:, :1, :], context_outputs[:, 1:, :]], dim=1)  # replace context's [CLS] to slot's [CLS]
-            outputs = self.context_attention(outputs, context_mask)[0]  # outputs: [batch, context_len, hidden]
+            outputs = torch.cat([context_outputs[:, 0, :], slot_outputs[:, 0, :]], dim=1)  # outputs: [batch, hidden*2]
+            # outputs = self.context_attention(outputs, context_mask)[0]  # outputs: [batch, context_len, hidden]
             
-            gate_output = self.linear_gate(outputs[:, 0, :])  # gate_output: [batch, 3]
+            gate_output = self.linear_gate(outputs)  # gate_output: [batch, 3]
             gate_output = F.log_softmax(gate_output, dim=1)
 
             gate_label = turn_input["gate"][:, slot_idx]  # gate_label: [batch]
@@ -120,10 +120,10 @@ class DST(nn.Module):
 
             if self.use_span:  # use span-based method
                 span_outputs = None
-                for token_idx in range(outputs.size(1)):
+                for token_idx in range(context_outputs.size(1)):
                     if token_idx == 0:  # [CLS]
                         continue
-                    token_output = outputs[:, token_idx, :]  # token_output: [batch, hidden]
+                    token_output = context_outputs[:, token_idx, :]  # token_output: [batch, hidden]
                     token_output = self.linear_span(token_output)  # token_output: [batch, 2]
                     token_output = token_output.unsqueeze(2)  # token_output: [batch, 2, 1]
                     if span_outputs is None:
@@ -144,7 +144,7 @@ class DST(nn.Module):
                 value_output = torch.tensor([self.tokenizer.encode(value)])
                 value_output = value_output.cuda()
                 value_output = self.value_encoder(value_output)[0]  # value_outputs: [1, value_len, hidden]
-                value_prob = torch.cosine_similarity(outputs[:, 0, :], value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # value_prob: [batch, 1]
+                value_prob = torch.cosine_similarity(context_outputs[:, 0, :], value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # value_prob: [batch, 1]
                 if value_probs is None:
                     value_probs = value_prob
                 else:
@@ -154,7 +154,7 @@ class DST(nn.Module):
             value_label = turn_input["belief"][:, slot_idx, :]  # value_label: [batch, value_len], including [PAD]
             value_mask = (value_label != 0)
             true_value_output = self.value_encoder(value_label, attention_mask=value_mask)[0]  # true_value_output: [batch, value_len, hidden]
-            true_value_probs = torch.cosine_similarity(outputs[:, 0, :], true_value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # true_value_prob: [batch, 1]
+            true_value_probs = torch.cosine_similarity(context_outputs[:, 0, :], true_value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # true_value_prob: [batch, 1]
 
             acc_slot = torch.ones(batch_size).cuda()  # acc_slot: [batch]
             

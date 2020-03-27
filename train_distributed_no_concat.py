@@ -75,12 +75,12 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                 
                 # split batches for gpu memory
                 context_len = contexts[turn_idx].size(1)
-                if context_len >= 350:
-                    small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 8), distributed_batch_size)
-                elif context_len >= 220:
+                if context_len >= 300:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 4), distributed_batch_size)
-                elif context_len >= 130:
+                elif context_len >= 180:
                     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
+                # elif context_len >= 130:
+                #     small_batch_size = min(int(hparams.batch_size/hparams.num_gpus / 2), distributed_batch_size)
                 else:
                     small_batch_size = distributed_batch_size
 

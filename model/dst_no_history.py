@@ -76,8 +76,13 @@ class DST(nn.Module):
             value_label = torch.zeros((batch_size, self.max_value_len), dtype=torch.int64).cuda()  # value_label: [batch, value_len]
             value_max_len = 0
 
-            # use previous belief
-            teacher_forcing = 1 if train else 0
+            # # use previous belief
+            # if train:
+            #     teacher_forcing = 1 if np.random.rand() >= 0.5 else 0
+            # else:
+            #     teacher_forcing = 0
+
+            teacher_forcing = 0
 
             context = torch.zeros((batch_size, self.max_context_len), dtype=torch.int64).cuda()  # context: [batch, context_len]
             max_len = 0
