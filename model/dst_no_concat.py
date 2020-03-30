@@ -161,7 +161,6 @@ class DST(nn.Module):
             mask = (gate_label != gate_output.argmax(dim=1))
             acc_slot.masked_fill_(mask, 0)  # fail to predict gate
 
-            pred_value = torch.zeros_like(value_label).cuda()  # pred_value: [batch, value_len]
             value_probs_ = value_probs.argmax(dim=1)  # value_probs: [batch]
             for batch_idx in range(batch_size):
                 pred = self.tokenizer.encode(value_list[value_probs_[batch_idx]])  # pred: [value_len]
