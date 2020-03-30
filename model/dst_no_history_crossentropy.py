@@ -127,7 +127,7 @@ class DST(nn.Module):
             for v_idx, value in enumerate(value_list):
                 value = self.tokenizer.encode(value)
                 for idx in range(batch_size):
-                    if self.tokenizer.encode(value) == turn_input["belief"][idx][slot_idx]:
+                    if value == turn_input["belief"][idx][slot_idx]:
                         value_label[idx] = v_idx
                 value_output = torch.tensor([value]).cuda()
                 value_output = self.value_encoder(value_output)[0]  # value_outputs: [1, value_len, hidden]
