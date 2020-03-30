@@ -144,7 +144,12 @@ class DST(nn.Module):
             pred_value = torch.zeros_like(value_label).cuda()  # pred_value: [batch, value_len]
             value_probs_ = value_probs.argmax(dim=1)  # value_probs: [batch]
             for batch_idx in range(batch_size):
-                pred = self.tokenizer.encode(value_list[value_probs_[batch_idx]])
+                if gate_output[batch_idx] == 0:
+                    pred = self.tokenizer.encode("none")
+                elif gate_output[batch_idx] == 2:
+                    pred = self.tokenizer.encode("don't care")
+                else:
+                    pred = self.tokenizer.encode(value_list[value_probs_[batch_idx]])
                 belief_gen[batch_idx].append(pred)
                 if gate_label[batch_idx] == ontology.gate_dict["prediction"] and value_label[batch_idx, :len(pred)].tolist() != pred:
                     acc_slot[batch_idx] = 0

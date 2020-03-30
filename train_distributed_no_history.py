@@ -14,7 +14,7 @@ from apex import amp, parallel
 from tqdm import tqdm
 from transformers import DistilBertTokenizerFast
 
-from model.dst_no_history_crossentropy import DST
+from model.dst_no_history import DST
 from config import Config
 from reader import Reader
 import ontology
@@ -82,7 +82,8 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
 
                 first_turn = (turn_idx == 0)
 
-                teacher_forcing = 1 if np.random.rand() >= 0.5 else 0
+                # teacher_forcing = 1 if np.random.rand() >= 0.5 else 0
+                teacher_forcing = 0
 
                 if not first_turn:
                     if teacher_forcing:  

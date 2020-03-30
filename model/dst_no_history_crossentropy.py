@@ -144,7 +144,12 @@ class DST(nn.Module):
 
             pred_value = value_probs.argmax(dim=1)  # pred_value: [batch]
             for batch_idx in range(batch_size):
-                pred = pred_value[batch_idx]
+                if gate_output[batch_idx] == 0:
+                    pred = self.tokenizer.encode("none")
+                elif gate_output[batch_idx] == 2:
+                    pred = self.tokenizer.encode("don't care")
+                else:
+                    pred = pred_value[batch_idx]
                 belief_gen[batch_idx].append(self.tokenizer.encode(value_list[pred]))
                 if gate_label[batch_idx] == ontology.gate_dict["prediction"] and value_label[batch_idx] != pred:
                     acc_slot[batch_idx] = 0
