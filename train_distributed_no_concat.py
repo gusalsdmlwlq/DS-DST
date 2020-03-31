@@ -100,11 +100,10 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
                     optimizer.zero_grad()
                     loss, acc = model.forward(small_inputs, small_contexts, small_spans)  # loss: [batch], acc: [batch, slot]
 
-                    total_loss += loss.sum(dim=0).item()
+                    total_loss += loss.item()*small_batch_size
                     slot_acc += acc.sum(dim=1).sum(dim=0).item()
                     joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
                     batch_count += small_batch_size
-                    loss = loss.mean(dim=0)
 
                     # distributed training
                     with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -159,7 +158,7 @@ def validate(model, reader, hparams, tokenizer):
                 
                 loss, acc = model.forward(inputs[turn_idx], contexts[turn_idx], spans[turn_idx], train=False)
             
-                val_loss += loss.sum(dim=0).item()
+                val_loss += loss.item()*distributed_batch_size
                 slot_acc += acc.sum(dim=1).sum(dim=0).item()
                 joint_acc += (acc.mean(dim=1) == 1).sum(dim=0).item()
 

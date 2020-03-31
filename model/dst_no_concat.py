@@ -73,7 +73,7 @@ class DST(nn.Module):
         self.linear_span = nn.Linear(self.hidden_size, 2)  # start, end
         self.value_ontology = json.load(open(os.path.join(hparams.data_path, "ontology_processed.json"), "r"))
         self.gate_loss_weight = torch.tensor([0.5, 1.0, 1.0])
-        self.gate_criterion = torch.nn.NLLLoss(weight=self.gate_loss_weight, reduction="none")
+        self.gate_criterion = torch.nn.NLLLoss(weight=self.gate_loss_weight)
         # self.context_attention = SelfAttention(self.hidden_size, hparams.dropout)
         # self.context_attention = copy.deepcopy(self.context_encoder.transformer.layer[-1])
         # self.context_attention.train()
@@ -180,7 +180,7 @@ class DST(nn.Module):
                         break
             value_probs.masked_fill_(true_value_mask, value=-1.0)
             max_value_probs = value_probs.max(dim=1, keepdim=True)[0]  # max_value_probs: [batch, 1]
-            loss_value = torch.max(torch.cat([torch.zeros_like(true_value_probs), self.margin - true_value_probs + max_value_probs], dim=1),dim=1)[0]  # loss_value: [batch]
+            loss_value = torch.max(torch.cat([torch.zeros_like(true_value_probs), self.margin - true_value_probs + max_value_probs], dim=1),dim=1)[0].mean()  # loss_value: [1]
 
             # loss_slot: [batch]
             if self.use_span:
@@ -190,7 +190,7 @@ class DST(nn.Module):
 
             loss.append(loss_slot)
         
-        loss = torch.stack(loss, dim=1).sum(dim=1)  # loss: [batch]
+        loss = torch.stack(loss, dim=0).sum(dim=0)  # loss: [1]
         acc = torch.stack(acc, dim=1)  # acc: [batch, slot]
 
         return loss, acc
