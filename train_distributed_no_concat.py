@@ -66,8 +66,8 @@ def train(model, reader, optimizer, writer, hparams, tokenizer):
         batch_count = 0  # number of batches
 
         # learning rate scheduling
-        for param in optimizer.param_groups:
-            param["lr"] = learning_rate_schedule(train.global_step, train.max_iter, hparams)
+        # for param in optimizer.param_groups:
+        #     param["lr"] = learning_rate_schedule(train.global_step, train.max_iter, hparams)
 
         try:
             for turn_idx in range(turns):
@@ -231,8 +231,10 @@ if __name__ == "__main__":
 
     tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
 
+    lr = hparams.lr
+
     model = DST(hparams).cuda()
-    optimizer = Adam(model.parameters(), hparams.lr)
+    optimizer = Adam(model.parameters(), lr)
     model, optimizer = amp.initialize(model, optimizer, opt_level="O1", verbosity=0)
     if hparams.distributed:
         model = parallel.DistributedDataParallel(model)
@@ -279,6 +281,11 @@ if __name__ == "__main__":
             if early_stop_count == 0:
                 logger.info("Early stopped.")
                 break
+            elif early_stop_count == 2:
+                lr = lr / 2
+                logger.info("learning rate schedule: {}".format(lr))
+                for param in optimizer.param_groups:
+                    param["lr"] = lr
             early_stop_count -= 1
             logger.info("early stop count: {}".format(early_stop_count))
     logger.info("Training finished.")
