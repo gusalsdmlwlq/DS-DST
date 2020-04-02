@@ -66,7 +66,9 @@ class DST(nn.Module):
         batch_size = len(turn_context)
         loss = []
         acc = []
-        belief_gen = [[]] * batch_size  # belief_gen: [batch, slots, value_len]
+        belief_gen = []  # belief_gen: [batch, slots, value_len]
+        for b in range(batch_size):
+            belief_gen.append([])
 
         for slot_idx in range(len(ontology.all_info_slots)):
             slot_ = ontology.all_info_slots[slot_idx]
@@ -120,16 +122,15 @@ class DST(nn.Module):
                 span_label.masked_fill_(span_mask, 0)           
                 loss_span = F.nll_loss(span_outputs[:, 0, :], span_label[:, 0], reduction="none") + F.nll_loss(span_outputs[:, 1, :], span_label[:, 1], reduction="none")
 
-            value_probs = None
+            value_probs = []
             value_list = self.value_ontology[slot_] + ["none"]
             for value in value_list:
                 value_output = torch.tensor([self.tokenizer.encode(value)]).cuda()
                 value_output = self.value_encoder(value_output)[0]  # value_outputs: [1, value_len, hidden]
-                value_prob = torch.cosine_similarity(outputs[:, 0, :], value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # value_prob: [batch, 1]
-                if value_probs is None:
-                    value_probs = value_prob
-                else:
-                    value_probs = torch.cat([value_probs, value_prob], dim=1)  # value_probs: [batch, value_nums]
+                value_prob = torch.cosine_similarity(outputs[:, 0, :], value_output[:, 0, :], dim=1)  # value_prob: [batch]
+                value_probs.append(value_prob)
+
+            value_probs = torch.stack(value_probs, dim=1)  # value_probs: [batch, value_nums]
 
             # cosine similarity of true value with context
             value_mask = (value_label != 0)
@@ -161,7 +162,7 @@ class DST(nn.Module):
             for idx in range(batch_size):
                 for v_idx, v in enumerate(value_list):
                     v = self.tokenizer.encode(v)
-                    if v == value_label[idx][:len(v)]:
+                    if v == value_label[idx][:len(v)].tolist():
                         true_value_mask[idx, v_idx] = True
                         break
             value_probs.masked_fill_(true_value_mask, value=-1.0)

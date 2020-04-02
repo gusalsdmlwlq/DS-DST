@@ -140,7 +140,7 @@ class DST(nn.Module):
                 span_label.masked_fill_(span_mask, 0)           
                 loss_span = F.nll_loss(span_outputs[:, 0, :], span_label[:, 0], reduction="none") + F.nll_loss(span_outputs[:, 1, :], span_label[:, 1], reduction="none")
 
-            value_probs = None
+            value_probs = []
             value_list = self.value_ontology[slot_] + ["none"]
             for v_idx, value in enumerate(value_list):
                 value_output = torch.tensor([self.tokenizer.encode(value)]).cuda()  # value_output: [1, value_len]
@@ -150,11 +150,10 @@ class DST(nn.Module):
                         value_label[idx] = v_idx
 
                 value_output = self.value_encoder(value_output)[0]  # value_outputs: [1, value_len, hidden]
-                value_prob = torch.cosine_similarity(context_outputs[:, 0, :], value_output[:, 0, :], dim=1).unsqueeze(dim=1)  # value_prob: [batch, 1]
-                if value_probs is None:
-                    value_probs = value_prob
-                else:
-                    value_probs = torch.cat([value_probs, value_prob], dim=1)  # value_probs: [batch, value_nums]
+                value_prob = torch.cosine_similarity(context_outputs[:, 0, :], value_output[:, 0, :], dim=1)  # value_prob: [batch]
+                value_probs.append(value_prob)
+
+            value_probs = torch.stack(value_probs, dim=1)  # value_probs: [batch, value_nums]
 
             acc_slot = torch.ones(batch_size).cuda()  # acc_slot: [batch]
             
